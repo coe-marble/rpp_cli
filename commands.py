@@ -43,10 +43,12 @@ def _prepare_registry_target(args):
 
 def _validate_description_uniqueness(description: Dict, registry_path: Path) -> str:
     registry = registry_api.load_registry(registry_path=registry_path)
-    plugins = registry.setdefault("plugins", {})
-    plugin_id = description["plugin"]["id"]
+    plugins = registry.setdefault("Plugins", {})
+    plugin = description.get("Plugin", {})
+    plugin_id = plugin.get("Id")
     registry_api.validate_unique_plugin_id(plugin_id, plugins)
-    registry_api.validate_unique_class_name(description["plugin"].get("class_name"), plugin_id, plugins)
+    class_name = plugin.get("ClassName")
+    registry_api.validate_unique_class_name(class_name, plugin_id, plugins)
     return plugin_id
 
 
@@ -122,7 +124,8 @@ def command_scaffold(args) -> None:
 
 
 def command_init_home(args) -> None:
-    registry_api.ensure_rpp_layout()
+    registry_api.RPP_HOME = RPP_HOME
+    registry_api.ensure_rpp_layout(override_initialization=True)
     paths = registry_api.get_rpp_paths()
     print(f"Initialized rpp home at: {paths['home']}")
     print(f"Descriptions: {paths['descriptions']}")
@@ -134,7 +137,7 @@ def command_list_registry(args) -> None:
     paths = registry_api.get_rpp_paths()
     registry_path = registry_api.resolve_output_path(args.registry, paths["registry"])
     registry = registry_api.list_registered_plugins(registry_path)
-    plugins = registry.get("plugins", {})
+    plugins = registry.get("Plugins", {})
 
     if args.format == "json":
         print(json.dumps(registry, indent=2, sort_keys=False))
@@ -144,7 +147,9 @@ def command_list_registry(args) -> None:
     print(f"Total plugins: {len(plugins)}")
     for plugin_id in sorted(plugins):
         data = plugins[plugin_id]
-        print(f"- {plugin_id} [{data.get('source_language', '?')}] {data.get('name', '?')}")
+        source_language = data.get("SourceLanguage", "?")
+        plugin_name = data.get("Name", "?")
+        print(f"- {plugin_id} [{source_language}] {plugin_name}")
 
 
 def command_add(args) -> None:
