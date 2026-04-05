@@ -1,0 +1,17 @@
+{
+    "Library": "test_lib_with_deps",
+    "Plugins": [
+        {
+            "Type": "file",
+            "Path": "src/TestController.py",
+            "Name": "TestController"
+        }
+    ],
+    "PluginTypes": [
+        {
+            "Type": "file",
+            "Path": "plugin_types/TestNNType.py",
+            "Name": "TestNNType"
+        }
+    ]
+}

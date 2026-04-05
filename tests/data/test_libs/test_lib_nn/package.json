@@ -1,0 +1,10 @@
+{
+    "Library": "test_lib_nn",
+    "Version": "0.0.1",
+    "Dependencies": ["data_driven_lib"],
+    "Install": [
+        {
+            
+        }
+    ]
+}

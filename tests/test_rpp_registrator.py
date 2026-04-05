@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import rpp_plugin_registrator.registry_paths as rp
+import rpp_plugin_registrator.plugin_type_registrator as ptyp_reg_api
 
 def load_registrator_functions():
     import rpp_cli.commands as registrator
@@ -29,11 +30,6 @@ class BaseRegistratorTests(unittest.TestCase):
             home.mkdir(parents=True, exist_ok=True)
             rp.RPP_HOME = home
             try:
-                marker_path = home / rp.INITIALIZED_MARKER_FILENAME
-                marker_path.write_text(
-                    json.dumps({"SchemaVersion": 1, "Initialized": True, "InitializedPlugins": []}) + "\n",
-                    encoding="utf-8",
-                )
                 yield home
             finally:
                 rp.RPP_HOME = original_home
@@ -108,313 +104,6 @@ class SamplePlugin(RPP_Plugin):
             self.assertIn("class HelloPlugin", content)
             self.assertIn('return "hello"', content)
 
-    def test_register_from_source_writes_description_and_registry(self):
-        with self._temp_registry_home() as home:
-            with tempfile.TemporaryDirectory() as td:
-                temp_root = Path(td)
-                source = temp_root / "echo_plugin.py"
-                source.write_text(
-                """
-from rpp_common import RPP_Plugin
-
-
-class EchoPlugin(RPP_Plugin):
-    def name(self) -> str:
-        return \"echo\"
-
-    def execute(self, input: str) -> str:
-        return input
-""".strip()
-                + "\n",
-                encoding="utf-8",
-                )
-
-                description_dir = home / "descriptions"
-                registry_path = home / "registry" / "rpp_plugin_types.registry.json"
-
-                args = argparse.Namespace(
-                    source=str(source),
-                    folder=None,
-                    language=None,
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-                self.reg.command_register(args)
-
-                description_file = description_dir / "rpp_echo_plugin.plugin.json"
-                self.assertTrue(description_file.exists())
-                self.assertTrue(registry_path.exists())
-
-                registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
-                self.assertIn("rpp_echo_plugin", registry_payload["PluginTypes"])
-                self.assertEqual(
-                    registry_payload["PluginTypes"]["rpp_echo_plugin"]["DescriptionFile"],
-                    str(description_file),
-                )
-
-    def test_register_folder_does_not_fail_when_empty(self):
-        with self._temp_registry_home() as home:
-            with tempfile.TemporaryDirectory() as td:
-                temp_root = Path(td)
-                descriptions = temp_root / "descriptions"
-                descriptions.mkdir(parents=True, exist_ok=True)
-
-                args = argparse.Namespace(
-                    source=None,
-                    folder=str(descriptions),
-                    language=None,
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-
-                out = io.StringIO()
-                with redirect_stdout(out):
-                    self.reg.command_register(args)
-                text = out.getvalue()
-
-                self.assertIn("No plugin description files found in folder", text)
-
-    def test_register_csbenchlab_fixture_plugins_include_public_methods(self):
-        controller_module = importlib.import_module("rpp_common.common_plugins.Controller")
-        dynsystem_module = importlib.import_module("rpp_common.common_plugins.DynSystem")
-        disturbance_module = importlib.import_module("rpp_common.common_plugins.DisturbanceGenerator")
-        estimator_module = importlib.import_module("rpp_common.common_plugins.Estimator")
-        plugin_sources = [
-            Path(controller_module.__file__).resolve(),
-            Path(dynsystem_module.__file__).resolve(),
-            Path(disturbance_module.__file__).resolve(),
-            Path(estimator_module.__file__).resolve(),
-        ]
-
-        with self._temp_registry_home() as home:
-            for source in plugin_sources:
-                args = argparse.Namespace(
-                    source=str(source),
-                    folder=None,
-                    language="python",
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-                self.reg.command_register(args)
-
-            registry_path = home / "registry" / "rpp_plugin_types.registry.json"
-            self.assertTrue(registry_path.exists())
-            registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
-
-            expected_ids = {
-                "rpp_controller",
-                "rpp_dyn_system",
-                "rpp_disturbance_generator",
-                "rpp_estimator",
-            }
-            self.assertTrue(expected_ids.issubset(set(registry_payload["PluginTypes"].keys())))
-
-            for plugin_id in expected_ids:
-                description_path = Path(registry_payload["PluginTypes"][plugin_id]["DescriptionFile"])
-                payload = json.loads(description_path.read_text(encoding="utf-8"))
-                plugin = payload["Plugin"]
-
-                self.assertIn("ParamDescription", plugin)
-                self.assertIn("LogDescription", plugin)
-                self.assertIn("InputDescription", plugin)
-                self.assertIn("OutputDescription", plugin)
-                self.assertIsInstance(plugin["ParamDescription"], list)
-                self.assertIsInstance(plugin["LogDescription"], list)
-                self.assertIsInstance(plugin["InputDescription"], list)
-                self.assertIsInstance(plugin["OutputDescription"], list)
-
-                method_names = [m["Name"] for m in plugin["Interface"]["Methods"]]
-                for name in method_names:
-                    self.assertFalse(name.startswith("_"), name)
-                    self.assertFalse(name.endswith("_"), name)
-
-            controller_description = Path(registry_payload["PluginTypes"]["rpp_controller"]["DescriptionFile"])
-            controller_payload = json.loads(controller_description.read_text(encoding="utf-8"))
-            controller_methods = {
-                m["Name"] for m in controller_payload["Plugin"]["Interface"]["Methods"]
-            }
-            self.assertIn("create_data_model", controller_methods)
-            self.assertIn("configure", controller_methods)
-            self.assertIn("step", controller_methods)
-            self.assertIn("reset", controller_methods)
-
-    def test_register_overrides_class_tag_with_plugin_id(self):
-        controller_module = importlib.import_module("rpp_common.common_plugins.Controller")
-        source = Path(controller_module.__file__).resolve()
-
-        with self._temp_registry_home() as home:
-            args = argparse.Namespace(
-                source=str(source),
-                folder=None,
-                language="python",
-                plugin_id="controller_override",
-                description=None,
-                registry=None,
-            )
-            self.reg.command_register(args)
-
-            registry_path = home / "registry" / "rpp_plugin_types.registry.json"
-            registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
-
-            self.assertIn("controller_override", registry_payload["PluginTypes"])
-            self.assertNotIn("rpp_controller", registry_payload["PluginTypes"])
-
-    def test_register_duplicate_tag_raises_error(self):
-        with self._temp_registry_home():
-            with tempfile.TemporaryDirectory() as td:
-                temp_root = Path(td)
-                first = temp_root / "first.py"
-                first.write_text(
-                    """
-from rpp_common import RPP_Plugin
-
-
-class FirstPlugin(RPP_Plugin):
-    tag = "dup"
-
-    def run(self):
-        return 1
-""".strip()
-                    + "\n",
-                    encoding="utf-8",
-                )
-
-                second = temp_root / "second.py"
-                second.write_text(
-                    """
-from rpp_common import RPP_Plugin
-
-
-class SecondPlugin(RPP_Plugin):
-    tag = "dup"
-
-    def run(self):
-        return 2
-""".strip()
-                    + "\n",
-                    encoding="utf-8",
-                )
-
-                args_first = argparse.Namespace(
-                    source=str(first),
-                    folder=None,
-                    language="python",
-                    plugin_id="dup",
-                    description=None,
-                    registry=None,
-                )
-                self.reg.command_register(args_first)
-
-                args_second = argparse.Namespace(
-                    source=str(second),
-                    folder=None,
-                    language="python",
-                    plugin_id="dup",
-                    description=None,
-                    registry=None,
-                )
-                with self.assertRaises(ValueError):
-                    self.reg.command_register(args_second)
-
-    def test_register_duplicate_class_name_raises_error(self):
-        with self._temp_registry_home():
-            with tempfile.TemporaryDirectory() as td:
-                temp_root = Path(td)
-                first = temp_root / "first_class.py"
-                first.write_text(
-                    """
-from rpp_common import RPP_Plugin
-
-
-class SameClass(RPP_Plugin):
-    tag = "same_a"
-
-    def run(self):
-        return 1
-""".strip()
-                    + "\n",
-                    encoding="utf-8",
-                )
-
-                second = temp_root / "second_class.py"
-                second.write_text(
-                    """
-from rpp_common import RPP_Plugin
-
-
-class SameClass(RPP_Plugin):
-    tag = "same_b"
-
-    def run(self):
-        return 2
-""".strip()
-                    + "\n",
-                    encoding="utf-8",
-                )
-
-                args_first = argparse.Namespace(
-                    source=str(first),
-                    folder=None,
-                    language="python",
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-                self.reg.command_register(args_first)
-
-                args_second = argparse.Namespace(
-                    source=str(second),
-                    folder=None,
-                    language="python",
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-                with self.assertRaises(ValueError):
-                    self.reg.command_register(args_second)
-
-    def test_registry_info_prints_single_plugin_description(self):
-        with self._temp_registry_home() as home:
-            with tempfile.TemporaryDirectory() as td:
-                temp_root = Path(td)
-                source = temp_root / "echo_plugin.py"
-                source.write_text(
-                """
-from rpp_common.py.RPP_Plugin import RPP_Plugin
-
-
-class EchoPlugin(RPP_Plugin):
-    def name(self) -> str:
-        return \"echo\"
-
-    def execute(self, input: str) -> str:
-        return input
-""".strip()
-                + "\n",
-                encoding="utf-8",
-                )
-
-                register_args = argparse.Namespace(
-                    source=str(source),
-                    folder=None,
-                    language=None,
-                    plugin_id=None,
-                    description=None,
-                    registry=None,
-                )
-                self.reg.command_register(register_args)
-
-                info_args = argparse.Namespace(tag="rpp_echo_plugin", registry=None)
-                out = io.StringIO()
-                with redirect_stdout(out):
-                    self.reg.command_registry_info(info_args)
-
-                payload = json.loads(out.getvalue())
-                self.assertEqual(payload["Plugin"]["Id"], "rpp_echo_plugin")
-
     def test_init_home_forces_initialization_override(self):
         args = argparse.Namespace()
         with mock.patch.object(self.reg.registry_api, "ensure_rpp_layout") as ensure_layout:
@@ -435,6 +124,56 @@ class EchoPlugin(RPP_Plugin):
 
 
 class LibraryCommandTests(BaseRegistratorTests):
+
+    def test_library_registers_fixture_from_tests_data(self):
+        with self._temp_registry_home() as home:
+            fixture_lib = Path(__file__).resolve().parent / "data" / "test_libs" / "test_lib_nn"
+            self.assertTrue(fixture_lib.exists(), f"Missing fixture library: {fixture_lib}")
+
+            args = argparse.Namespace(library_args=["register", str(fixture_lib)])
+            self.reg.command_library(args)
+
+            manager = self.reg.LibraryManager(rpp_home=home)
+            libraries = manager.list_component_libraries()
+            library_names = {lib["Name"] for lib in libraries}
+
+            self.assertIn("test_lib_nn", library_names)
+
+    def test_library_registers_fixture_plugin_types_from_plugins_json(self):
+        with self._temp_registry_home() as home:
+            fixture_lib = Path(__file__).resolve().parent / "data" / "test_libs" / "test_lib_nn"
+            args = argparse.Namespace(library_args=["register", str(fixture_lib)])
+
+            # ensure common plugin types are registered first
+            ptyp_reg_api.ensure_rpp_layout()
+
+            self.reg.command_library(args)
+
+            manifest_path = home / "libraries" / "test_lib_nn" / "autogen" / "manifest.json"
+            self.assertTrue(manifest_path.exists())
+
+            # test plugin type
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertIn("PluginTypes", payload)
+            self.assertIn("test_lib_nn::TestNNType", payload["PluginTypes"])
+            nn_plugin = payload["PluginTypes"]["test_lib_nn::TestNNType"]
+            self.assertEqual(nn_plugin["Library"], "test_lib_nn")
+            self.assertTrue(nn_plugin["DescriptionFile"].endswith("TestNNType.py"))
+            self.assertEqual(nn_plugin["ClassName"], "TestNNType")
+            self.assertEqual(nn_plugin["PluginType"], "test_lib_nn::TestNNType")
+            self.assertEqual(nn_plugin["FullyQualifiedClassName"], "<class 'TestNNType.TestNNType'>")
+
+            # test plugin
+            self.assertIn("Plugins", payload)
+            self.assertIn("test_lib_nn::TestController", payload["Plugins"])
+            plugin = payload["Plugins"]["test_lib_nn::TestController"]
+            self.assertEqual(plugin["Library"], "test_lib_nn")
+            self.assertEqual(plugin["ClassName"], "TestController")
+            self.assertEqual(plugin["PluginType"], "rpp::Controller")
+            self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController")
+            self.assertEqual(plugin["FullyQualifiedClassName"], "<class 'TestController.TestController'>")
+            self.assertEqual(plugin["FullyQualifiedPluginClassName"], "<class 'rpp_common.common_plugins.Controller.Controller'>")
+            self.assertEqual(plugin["PluginClassName"], "Controller")
 
     def test_library_register_path_calls_register_component_library(self):
         with self._temp_registry_home():

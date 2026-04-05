@@ -13,6 +13,7 @@ from rpp_plugin_registrator.plugin_descriptors import (
 )
 from rpp_plugin_registrator.library_manager import LibraryManager
 import rpp_plugin_registrator.plugin_type_registrator as registry_api
+import rpp_plugin_registrator.registry_paths as rp
 from rpp_plugin_registrator.scaffold import scaffold_cpp, scaffold_python
 from rpp_plugin_registrator.utils import to_snake_case
 
@@ -39,86 +40,14 @@ def command_register(args, library_manager=None) -> None:
         print(f"Registered library: {registered_path}")
         return
 
-    # Backward-compatible form used by older tests/programmatic callers:
-    # register plugin descriptions/sources into registry.
-    registry_api.ensure_rpp_layout()
-    paths = registry_api.get_rpp_paths()
-    registry_path = registry_api.resolve_output_path(getattr(args, "registry", None), paths["registry"])
-    library = getattr(args, "library", "legacy")
-
-    folder = getattr(args, "folder", None)
-    if folder:
-        folder_path = Path(folder).expanduser().resolve()
-        registered_files = registry_api.register_plugin_types_in_folder(folder_path, registry_path, library=library)
-        if not registered_files:
-            print(f"No plugin description files found in folder: {folder_path}")
-        else:
-            print(f"Registered {len(registered_files)} plugin descriptions from folder: {folder_path}")
-            for file_path in registered_files:
-                print(f"- {file_path}")
-        print(f"Registry path: {registry_path}")
-        return
-
-    source = getattr(args, "source", None)
-    if not source:
-        raise ValueError("Either 'lib_path' or one of 'source'/'folder' must be provided for register command.")
-
-    source_path = Path(source).expanduser().resolve()
-    if source_path.suffix.lower() == ".json":
-        registry_api.register_plugin_type(source_path, registry_path, library=library)
-        print(f"Registered plugin from description: {source_path}")
-        print(f"Registry path: {registry_path}")
-        return
-
-    plugin_id_override = resolve_plugin_id_override(args)
-    description = parse_plugin_file(source_path, plugin_id_override=plugin_id_override)
-    plugin = description.get("Plugin", {})
-    plugin_id = plugin.get("Id") or plugin_id_override or f"rpp_{to_snake_case(plugin.get('ClassName') or plugin.get('Name') or source_path.stem)}"
-    if not plugin_id:
-        raise ValueError(f"Plugin description for '{source_path}' does not include Plugin.Id")
-
-    plugin["Id"] = plugin_id
-
-    registry = registry_api.load_registry()
-    plugins = registry.setdefault("PluginTypes", {})
-    registry_api.validate_unique_plugin_id(plugin_id, plugins)
-    registry_api.validate_unique_class_name(plugin.get("ClassName"), plugin_id, plugins)
-
-    description_path = registry_api.resolve_output_path(
-        getattr(args, "description", None),
-        paths["descriptions"] / f"{plugin_id}.plugin.json",
-    )
-    registry_api.write_json(description_path, description)
-    registry_api.register_plugin_type(description_path, registry_path, library=library)
-
-    print(f"Described and registered plugin '{plugin_id}'")
-    print(f"Source: {source_path}")
-    print(f"Description: {description_path}")
-    print(f"Registry path: {registry_path}")
-
 
 def command_unregister(args, library_manager=None) -> None:
-    # New form: library removal by name.
     if hasattr(args, "lib_name") and getattr(args, "lib_name") is not None:
         manager = _get_library_manager(library_manager)
         removed = manager.remove_component_library(args.lib_name)
         print(f"Removed library: {removed}")
         return
 
-    # Backward-compatible form: unregister plugin type from registry.
-    plugin_id = getattr(args, "plugin_id", None)
-    if not plugin_id:
-        raise ValueError("Either 'lib_name' or 'plugin_id' must be provided for unregister command.")
-
-    registry_api.ensure_rpp_layout()
-    paths = registry_api.get_rpp_paths()
-    registry_path = registry_api.resolve_output_path(getattr(args, "registry", None), paths["registry"])
-    library = getattr(args, "library", "legacy")
-    removed = registry_api.unregister_plugin_type(plugin_id, registry_path, library=library)
-    if removed:
-        print(f"Unregistered plugin '{plugin_id}' from {registry_path}")
-    else:
-        print(f"Plugin '{plugin_id}' not found in {registry_path}")
 
 
 def command_generate_interface(args) -> None:
@@ -218,7 +147,7 @@ def command_pm(args) -> int:
 
 def command_list_registry(args) -> None:
     paths = registry_api.get_rpp_paths()
-    registry_path = registry_api.resolve_output_path(args.registry, paths["registry"])
+    registry_path = rp.resolve_output_path(args.registry, paths["registry"])
     registry = registry_api.list_registered_plugin_types(registry_path)
     plugins = registry.get("PluginTypes", {})
 
@@ -237,7 +166,7 @@ def command_list_registry(args) -> None:
 
 def command_registry_info(args) -> None:
     paths = registry_api.get_rpp_paths()
-    registry_path = registry_api.resolve_output_path(args.registry, paths["registry"])
+    registry_path = rp.resolve_output_path(args.registry, paths["registry"])
     registry = registry_api.list_registered_plugin_types(registry_path)
     plugins = registry.get("PluginTypes", {})
 
