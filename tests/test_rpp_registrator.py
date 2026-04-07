@@ -193,6 +193,38 @@ class LibraryCommandTests(BaseRegistratorTests):
                     ask_dialog=False,
                 )
 
+    def test_library_register_path_supports_link_install(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                lib_path = Path(td) / "my_lib"
+                lib_path.mkdir(parents=True, exist_ok=True)
+
+                manager = mock.Mock()
+                manager.register_component_library.return_value = str(lib_path)
+
+                args = argparse.Namespace(library_args=["register", str(lib_path), "--link"])
+                self.reg.command_library(args, library_manager=manager)
+
+                manager.register_component_library.assert_called_once_with(
+                    str(lib_path.resolve()),
+                    link_register=True,
+                    ask_dialog=False,
+                )
+
+    def test_library_register_reports_missing_path(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            missing_path = Path("/tmp/does-not-exist-rpp-library")
+            args = argparse.Namespace(library_args=["register", str(missing_path), "--link"])
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                result = self.reg.command_library(args, library_manager=manager)
+
+            manager.register_component_library.assert_not_called()
+            self.assertEqual(result, 1)
+            self.assertIn("Library path does not exist:", out.getvalue())
+
     def test_library_unregister_calls_remove_component_library(self):
         with self._temp_registry_home():
             manager = mock.Mock()
@@ -223,11 +255,81 @@ class LibraryCommandTests(BaseRegistratorTests):
     def test_library_named_refresh_calls_refresh_component_library(self):
         with self._temp_registry_home():
             manager = mock.Mock()
+            manager.get_library_path.return_value = "/tmp/data_driven_lib"
             args = argparse.Namespace(library_args=["data_driven_lib", "refresh"])
 
             self.reg.command_library(args, library_manager=manager)
 
+            manager.get_library_path.assert_called_once_with("data_driven_lib")
             manager.refresh_component_library.assert_called_once_with("data_driven_lib")
+
+    def test_library_refresh_reports_missing_library(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_library_path.return_value = None
+            args = argparse.Namespace(library_args=["refresh", "missing_lib"])
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                result = self.reg.command_library(args, library_manager=manager)
+
+            manager.get_library_path.assert_called_once_with("missing_lib")
+            manager.refresh_component_library.assert_not_called()
+            self.assertEqual(result, 1)
+            self.assertIn("Library 'missing_lib' does not exist.", out.getvalue())
+
+    def test_library_info_calls_get_library_info(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_library_info.return_value = {"Library": "rpp_control", "Version": "0.0.1"}
+            manager.get_library_path.return_value = "/tmp/rpp_control"
+            manager._manifest_path.return_value = "/tmp/rpp_control/autogen/manifest.json"
+            args = argparse.Namespace(library_args=["info", "rpp_control"])
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_library_info.assert_called_once_with("rpp_control", only_registered=True)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["Library"], "rpp_control")
+            self.assertIn("Plugins", payload)
+            self.assertIn("PluginTypes", payload)
+
+    def test_library_named_info_calls_get_library_info(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_library_info.return_value = {"Library": "data_driven_lib", "Version": "0.0.1"}
+            manager.get_library_path.return_value = "/tmp/data_driven_lib"
+            manager._manifest_path.return_value = "/tmp/data_driven_lib/autogen/manifest.json"
+            args = argparse.Namespace(library_args=["data_driven_lib", "info"])
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_library_info.assert_called_once_with("data_driven_lib", only_registered=True)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["Library"], "data_driven_lib")
+            self.assertIn("Plugins", payload)
+            self.assertIn("PluginTypes", payload)
+
+    def test_library_list_calls_list_component_libraries(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.list_component_libraries.return_value = [
+                {"Name": "rpp"},
+                {"Name": "rpp_control"},
+            ]
+            args = argparse.Namespace(library_args=["list"])
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.list_component_libraries.assert_called_once_with()
+            payload = json.loads(out.getvalue())
+            self.assertEqual([item["Name"] for item in payload], ["rpp", "rpp_control"])
 
     def test_library_register_usage_error_when_missing_path(self):
         with self._temp_registry_home():

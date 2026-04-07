@@ -15,6 +15,8 @@ from commands import (
     command_registry_info,
     command_list_registry,
     command_scaffold,
+    command_ws,
+    command_ws_create,
 )
 
 
@@ -33,6 +35,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="launch the plugin manager GUI",
     )
     pm_parser.set_defaults(func=command_pm)
+
+    ws_parser = subparsers.add_parser(
+        "ws",
+        help="workspace tools",
+    )
+    ws_parser.add_argument(
+        "--root",
+        default=None,
+        help="workspace folder to open in the GUI",
+    )
+    ws_subparsers = ws_parser.add_subparsers(dest="ws_command")
+
+    ws_create_parser = ws_subparsers.add_parser(
+        "create",
+        help="create a new RPP workspace on disk",
+    )
+    ws_create_parser.add_argument("name", help="workspace name")
+    ws_create_parser.add_argument(
+        "--root",
+        default=".",
+        help="root directory where the workspace folder will be created (default: current directory)",
+    )
+    ws_create_parser.add_argument("--overwrite", action="store_true", help="overwrite an existing empty root")
+    ws_create_parser.set_defaults(func=command_ws_create)
+
+    ws_parser.set_defaults(func=command_ws)
 
     # Registry commands
     registry_parser = subparsers.add_parser(

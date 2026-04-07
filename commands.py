@@ -16,6 +16,8 @@ import rpp_plugin_registrator.plugin_type_registrator as registry_api
 import rpp_plugin_registrator.registry_paths as rp
 from rpp_plugin_registrator.scaffold import scaffold_cpp, scaffold_python
 from rpp_plugin_registrator.utils import to_snake_case
+from rpp_orchestrator.cli import main as workspace_main
+from rpp_orchestrator.workspace import create_workspace
 
 
 def _describe_source(source_path: Path, language: str | None, plugin_id: str | None) -> Dict:
@@ -32,13 +34,22 @@ def command_describe(args) -> None:
     print(json.dumps(description, indent=2, sort_keys=False))
 
 
-def command_register(args, library_manager=None) -> None:
+def command_register(args, library_manager=None) -> int:
     if hasattr(args, "lib_path") and getattr(args, "lib_path") is not None:
         manager = _get_library_manager(library_manager)
         lib_path = Path(args.lib_path).expanduser().resolve()
-        registered_path = manager.register_component_library(str(lib_path), link_register=False, ask_dialog=False)
-        print(f"Registered library: {registered_path}")
-        return
+        if not lib_path.exists():
+            print(f"Library path does not exist: {lib_path}")
+            return 1
+
+        link_register = bool(getattr(args, "link", False))
+        registered_path = manager.register_component_library(str(lib_path), link_register=link_register, ask_dialog=False)
+        if link_register:
+            print(f"Linked library: {registered_path}")
+        else:
+            print(f"Registered library: {registered_path}")
+        return 0
+    return 1
 
 
 def command_unregister(args, library_manager=None) -> None:
@@ -72,10 +83,47 @@ def command_scaffold(args) -> None:
 def command_library_refresh(args, library_manager=None) -> None:
     library = args.library
     manager = _get_library_manager(library_manager)
+    library_path = manager.get_library_path(library)
+    if library_path is None:
+        print(f"Library '{library}' does not exist.")
+        return 1
+
     manager.refresh_component_library(library)
     print(f"Refreshing library '{library}'...")
     print(f"Library: {library}")
     print("Library refresh completed.")
+    return 0
+
+
+def command_library_info(args, library_manager=None) -> None:
+    library = args.library
+    manager = _get_library_manager(library_manager)
+    info = manager.get_library_info(library, only_registered=True)
+    plugins = {}
+    plugin_types = {}
+
+    try:
+        library_path = manager.get_library_path(library)
+        if library_path:
+            manifest_path = Path(manager._manifest_path(library_path))
+            if manifest_path.exists():
+                manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                plugins = manifest_payload.get("Plugins", {})
+                plugin_types = manifest_payload.get("PluginTypes", {})
+    except Exception:
+        pass
+
+    info = dict(info)
+    info["Plugins"] = plugins
+    info["PluginTypes"] = plugin_types
+    print(json.dumps(info, indent=2, sort_keys=False))
+
+
+def command_library_list(args, library_manager=None) -> None:
+    del args
+    manager = _get_library_manager(library_manager)
+    libraries = manager.list_component_libraries()
+    print(json.dumps(libraries, indent=2, sort_keys=False))
 
 
 def command_library_register_component(args, library_manager=None) -> None:
@@ -93,22 +141,47 @@ def command_library(args, library_manager=None) -> None:
     if not tokens:
         raise ValueError(
             "Usage: rpp library register <lib_path> | rpp library unregister <lib_name> | "
-            "rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh"
+            "rpp library refresh <lib_name> | rpp library info <lib_name> | rpp library list | "
+            "rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh | rpp library <lib_name> info"
         )
 
     if tokens[0] == "register":
-        if len(tokens) != 2:
-            raise ValueError("Usage: rpp library register <lib_path>")
-        return command_register(argparse.Namespace(lib_path=tokens[1]), library_manager=library_manager)
+        link_register = False
+        register_tokens = tokens[1:]
+        if "--link" in register_tokens:
+            link_register = True
+            register_tokens = [token for token in register_tokens if token != "--link"]
+
+        if len(register_tokens) != 1:
+            raise ValueError("Usage: rpp library register <lib_path> [--link]")
+        return command_register(
+            argparse.Namespace(lib_path=register_tokens[0], link=link_register),
+            library_manager=library_manager,
+        )
 
     if tokens[0] == "unregister":
         if len(tokens) != 2:
             raise ValueError("Usage: rpp library unregister <lib_name>")
         return command_unregister(argparse.Namespace(lib_name=tokens[1]), library_manager=library_manager)
 
+    if tokens[0] == "refresh":
+        if len(tokens) != 2:
+            raise ValueError("Usage: rpp library refresh <lib_name>")
+        return command_library_refresh(argparse.Namespace(library=tokens[1]), library_manager=library_manager)
+
+    if tokens[0] == "info":
+        if len(tokens) != 2:
+            raise ValueError("Usage: rpp library info <lib_name>")
+        return command_library_info(argparse.Namespace(library=tokens[1]), library_manager=library_manager)
+
+    if tokens[0] == "list":
+        if len(tokens) != 1:
+            raise ValueError("Usage: rpp library list")
+        return command_library_list(argparse.Namespace(), library_manager=library_manager)
+
     library = tokens[0]
     if len(tokens) < 2:
-        raise ValueError("Usage: rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh")
+        raise ValueError("Usage: rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh | rpp library <lib_name> info")
 
     action = tokens[1]
     if action == "register":
@@ -124,9 +197,15 @@ def command_library(args, library_manager=None) -> None:
             raise ValueError("Usage: rpp library <lib_name> refresh")
         return command_library_refresh(argparse.Namespace(library=library), library_manager=library_manager)
 
+    if action == "info":
+        if len(tokens) != 2:
+            raise ValueError("Usage: rpp library <lib_name> info")
+        return command_library_info(argparse.Namespace(library=library), library_manager=library_manager)
+
     raise ValueError(
-        "Unknown library action. Expected one of: register, unregister, refresh. "
-        "Supported forms: rpp library register <lib_path> or rpp library <lib_name> register <file_name>."
+        "Unknown library action. Expected one of: register, unregister, refresh, info, list. "
+        "Supported forms: rpp library register <lib_path> [--link], rpp library refresh <lib_name>, "
+        "rpp library info <lib_name>, rpp library list, or rpp library <lib_name> register <file_name>."
     )
 
 
@@ -143,6 +222,21 @@ def command_pm(args) -> int:
     plugin_manager_module = importlib.import_module("rpp_plugin_registrator.gui")
     result = plugin_manager_module.main()
     return int(result or 0)
+
+
+def command_ws(args) -> int:
+    workspace_root = getattr(args, "root", None)
+    if workspace_root:
+        return int(workspace_main(["--root", workspace_root]) or 0)
+    return int(workspace_main([]) or 0)
+
+
+def command_ws_create(args) -> int:
+    base_root = Path(getattr(args, "root", ".")).expanduser().resolve()
+    workspace_root = base_root / args.name
+    create_workspace(workspace_root, name=args.name, overwrite=args.overwrite)
+    print(f"Created workspace: {workspace_root}")
+    return 0
 
 
 def command_list_registry(args) -> None:
@@ -295,8 +389,12 @@ _rpp_completion() {
     # Library command completion supporting:
     # rpp library register <lib_path>
     # rpp library unregister <lib_name>
+    # rpp library refresh <lib_name>
+    # rpp library info <lib_name>
+    # rpp library list
     # rpp library <lib_name> register <file_name>
     # rpp library <lib_name> refresh
+    # rpp library <lib_name> info
     if [[ "${COMP_WORDS[1]}" == "library" ]]; then
         local libs
         if [[ -d "$HOME/.rpp/libraries" ]]; then
@@ -306,14 +404,24 @@ _rpp_completion() {
         fi
 
         if [[ ${cword} -eq 2 ]]; then
-            COMPREPLY=( $(compgen -W "register unregister ${libs}" -- "$cur") )
+            COMPREPLY=( $(compgen -W "register unregister refresh info list ${libs}" -- "$cur") )
             _rpp_gate_compreply "$cur"
+            return 0
+        fi
+
+        # rpp library list
+        if [[ "${COMP_WORDS[2]}" == "list" ]]; then
+            COMPREPLY=()
             return 0
         fi
 
         # rpp library register <lib_path>
         if [[ "${COMP_WORDS[2]}" == "register" ]]; then
-            COMPREPLY=( $(compgen -d -- "$cur") )
+            if [[ "$prev" == "register" || "$prev" == "--link" ]]; then
+                COMPREPLY=( $(compgen -d -- "$cur") )
+            else
+                COMPREPLY=( $(compgen -W "--link" -- "$cur") )
+            fi
             _rpp_gate_compreply "$cur"
             return 0
         fi
@@ -325,10 +433,24 @@ _rpp_completion() {
             return 0
         fi
 
+        # rpp library refresh <lib_name>
+        if [[ "${COMP_WORDS[2]}" == "refresh" ]]; then
+            COMPREPLY=( $(compgen -W "${libs}" -- "$cur") )
+            _rpp_gate_compreply "$cur"
+            return 0
+        fi
+
+        # rpp library info <lib_name>
+        if [[ "${COMP_WORDS[2]}" == "info" ]]; then
+            COMPREPLY=( $(compgen -W "${libs}" -- "$cur") )
+            _rpp_gate_compreply "$cur"
+            return 0
+        fi
+
         # rpp library <lib_name> register <file_name>
         # rpp library <lib_name> refresh
         if [[ ${cword} -eq 3 ]]; then
-            COMPREPLY=( $(compgen -W "register refresh" -- "$cur") )
+            COMPREPLY=( $(compgen -W "register refresh info" -- "$cur") )
             _rpp_gate_compreply "$cur"
             return 0
         fi
