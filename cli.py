@@ -8,8 +8,8 @@ import argparse
 from commands import (
     command_completion,
     command_library,
+    command_test,
     command_describe,
-    command_generate_interface,
     command_init_home,
     command_pm,
     command_registry_info,
@@ -102,15 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     registry_info_parser.set_defaults(func=command_registry_info)
 
-    interface_parser = registry_subparsers.add_parser(
-        "generate-interface",
-        help="generate a language interface from a plugin description",
-    )
-    interface_parser.add_argument("description", help="path to plugin description JSON file")
-    interface_parser.add_argument("--target-language", required=True, choices=["python", "cpp"])
-    interface_parser.add_argument("--output", required=True, help="output interface file path")
-    interface_parser.set_defaults(func=command_generate_interface)
-
     scaffold_parser = registry_subparsers.add_parser(
         "scaffold",
         help="create a starter plugin source file",
@@ -132,6 +123,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="library command args, e.g. 'register <lib_path>' or '<lib_name> register <file_name>'",
     )
     library_parser.set_defaults(func=command_library)
+
+    test_parser = subparsers.add_parser(
+        "test",
+        help="test related commands",
+    )
+
+    test_parser.add_argument(
+        "test_args",
+        nargs=argparse.REMAINDER,
+        help="test command args, e.g. ''",
+    )
+    test_parser.set_defaults(func=command_test)
+
 
     completion_parser = subparsers.add_parser(
         "completion",

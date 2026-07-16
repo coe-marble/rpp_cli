@@ -18,7 +18,7 @@ def load_cli_module():
     return cli
 
 
-class RppCliTests(unittest.TestCase):
+class RppCliCommandTests(unittest.TestCase):
     def setUp(self):
 
         self.cli = load_cli_module()
@@ -40,7 +40,7 @@ class RppCliTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertEqual(set(subparser_action.choices.keys()), {"init-home", "pm", "ws", "registry", "library", "completion"})
+        self.assertEqual(set(subparser_action.choices.keys()), {"init-home", "pm", "ws", "registry", "library", "completion", "test"})
 
         registry_parser = subparser_action.choices["registry"]
         registry_subparsers = next(

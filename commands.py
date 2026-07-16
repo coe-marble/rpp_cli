@@ -4,33 +4,87 @@ import argparse
 import importlib
 import json
 from pathlib import Path
-from typing import Dict
+from secrets import token_urlsafe
+from typing import Dict, Optional
 
-from rpp_plugin_registrator.interface_generators import generate_interface
+
+from rpp_plugin_registrator.payload_builders import build_plugin_type_info_payload
 from rpp_plugin_registrator.plugin_descriptors import (
-    parse_plugin_file,
-    resolve_plugin_id_override,
+    parse_plugin_file, parse_plugin_type_file
 )
+from rpp_plugin_registrator.plugin_validators import validate_plugin, validate_plugin_type
 from rpp_plugin_registrator.library_manager import LibraryManager
 import rpp_plugin_registrator.plugin_type_registrator as registry_api
 import rpp_plugin_registrator.registry_paths as rp
-from rpp_plugin_registrator.scaffold import scaffold_cpp, scaffold_python
-from rpp_plugin_registrator.utils import to_snake_case
+from rpp_plugin_registrator.plugin_scaffold import scaffold_plugin
+from rpp_plugin_registrator.plugin_descriptors.core import PluginTypeInfo, PluginInfo, plugin_id_from_name
 from rpp_orchestrator.cli import main as workspace_main
 from rpp_orchestrator.workspace import create_workspace
+from rpp_plugin_registrator.supported_plugins_and_types import (
+    get_supported_plugin_type_extensions,
+    get_supported_plugin_extensions
+)
+
+from testing import setup_tmp_rpp_with_test_plugins
 
 
-def _describe_source(source_path: Path, language: str | None, plugin_id: str | None) -> Dict:
-    return parse_plugin_file(source_path, plugin_id_override=plugin_id)  # type: ignore
+def _make_description_payload(parsed, validation_result, is_plugin=False) -> Dict:
+    payload = {
+        "SourceFile": str(parsed.get("SourceFile")),
+        "SourceLanguage": parsed.get("SourceLanguage"),
+        "ClassName": parsed.get("ClassName"),
+        "ValidationResult": {
+            "IsValid": validation_result.is_valid,
+            "Message": validation_result.message,
+        },
+    }
+    if is_plugin and validation_result.is_valid:
+        payload["PluginType"] = validation_result.validation_data.plugin_type
+    else:
+        pass
+    return payload
+
+def _describe_source(source_path: Path) -> Dict:
+    plugin_type_extensions = get_supported_plugin_type_extensions()
+    source_ext = source_path.suffix.lower()
+    descriptions = []
+    if source_ext in plugin_type_extensions:
+        parsed = parse_plugin_type_file(source_path)
+        if not parsed.is_valid or not parsed.data.plugins:
+            return descriptions
+        for p in parsed.data.plugins:
+            iface_desc = parsed.data.interfaces.get(p.interface_name)
+            desc = PluginTypeInfo(
+                info=build_plugin_type_info_payload(p, iface_desc, source_path),
+                register_data=None
+            )
+            validation_result = validate_plugin_type(desc)
+            descriptions.append(_make_description_payload(desc.info, validation_result, is_plugin=False))
+        return descriptions
+    plugin_extensions = get_supported_plugin_extensions()
+    if source_ext in plugin_extensions:
+        parsed = parse_plugin_file(source_path)
+        if not parsed.is_valid or not parsed.data.plugins:
+            return descriptions
+        plugin_types = registry_api.get_plugin_types()
+        for p in parsed.data.plugins:
+            desc = PluginInfo(
+                info=p,
+                register_data=None
+            )
+            validation_result = validate_plugin(desc, plugin_types)
+            descriptions.append(_make_description_payload(p, validation_result, is_plugin=True))
+    return descriptions
+
 
 
 def _get_library_manager(library_manager=None) -> LibraryManager:
     return library_manager if library_manager is not None else LibraryManager()
 
-
 def command_describe(args) -> None:
+    lm = _get_library_manager()
     source_path = Path(args.source).resolve()
-    description = _describe_source(source_path, args.language, resolve_plugin_id_override(args))
+    description = _describe_source(source_path)
     print(json.dumps(description, indent=2, sort_keys=False))
 
 
@@ -43,7 +97,7 @@ def command_register(args, library_manager=None) -> int:
             return 1
 
         link_register = bool(getattr(args, "link", False))
-        registered_path = manager.register_component_library(str(lib_path), link_register=link_register, ask_dialog=False)
+        registered_path = manager.register_plugin_library(str(lib_path), link_register=link_register, ask_dialog=False)
         if link_register:
             print(f"Linked library: {registered_path}")
         else:
@@ -52,31 +106,32 @@ def command_register(args, library_manager=None) -> int:
     return 1
 
 
-def command_unregister(args, library_manager=None) -> None:
+def command_unregister(args, library_manager: LibraryManager = None) -> None:
     if hasattr(args, "lib_name") and getattr(args, "lib_name") is not None:
         manager = _get_library_manager(library_manager)
-        removed = manager.remove_component_library(args.lib_name)
+        removed = manager.remove_plugin_library(args.lib_name)
         print(f"Removed library: {removed}")
         return
 
 
 
-def command_generate_interface(args) -> None:
-    description_path = Path(args.description).resolve()
-    output_path = Path(args.output).resolve()
-    generate_interface(description_path, args.target_language, output_path)
-    print(f"Generated {args.target_language} interface: {output_path}")
-
-
 def command_scaffold(args) -> None:
     output_path = Path(args.output).resolve()
-    class_name = args.class_name or f"{args.plugin_id.title().replace('_', '')}Plugin"
-    if args.language == "cpp":
-        scaffold_cpp(args.plugin_id, class_name, output_path)
-    elif args.language == "python":
-        scaffold_python(args.plugin_id, class_name, output_path)
+
+    if hasattr(args, "plugin_type"):
+        splited = args.plugin_type.split("::") if "::" in args.plugin_type  else None
+        if splited is None or len(splited) != 2:
+            raise ValueError(f"Invalid plugin type format: {args.plugin_type}. Expected format: <library>::<plugin_name>")
+        lib_name = splited[0]
+        plugin_name = splited[1]
     else:
-        raise ValueError(f"Unsupported scaffold language '{args.language}'.")
+        splited = None
+        lib_name = args.library_name
+        plugin_name = args.plugin_name
+
+    lm = _get_library_manager()
+    desc = lm.get_plugin_type_info_from_lib(plugin_name, lib_name)
+    scaffold_plugin(desc, output_path, languages=[args.language])
     print(f"Scaffolded {args.language} plugin source: {output_path}")
 
 
@@ -88,7 +143,7 @@ def command_library_refresh(args, library_manager=None) -> None:
         print(f"Library '{library}' does not exist.")
         return 1
 
-    manager.refresh_component_library(library)
+    manager.refresh_plugin_library(library)
     print(f"Refreshing library '{library}'...")
     print(f"Library: {library}")
     print("Library refresh completed.")
@@ -122,17 +177,17 @@ def command_library_info(args, library_manager=None) -> None:
 def command_library_list(args, library_manager=None) -> None:
     del args
     manager = _get_library_manager(library_manager)
-    libraries = manager.list_component_libraries()
+    libraries = manager.list_plugin_libraries()
     print(json.dumps(libraries, indent=2, sort_keys=False))
 
 
-def command_library_register_component(args, library_manager=None) -> None:
+def command_library_register_plugin(args, library_manager=None) -> None:
     manager = _get_library_manager(library_manager)
     source_path = Path(args.file_name).expanduser().resolve()
     if not source_path.exists() or not source_path.is_file():
         raise ValueError(f"Plugin source file does not exist: {source_path}")
-    manager.register_component_from_file(str(source_path), args.library)
-    manager.refresh_component_library(args.library)
+    manager.register_plugin_from_source(str(source_path), args.library)
+    manager.refresh_plugin_library(args.library)
     print(f"Registered plugin file '{source_path}' into library '{args.library}'")
 
 
@@ -187,7 +242,7 @@ def command_library(args, library_manager=None) -> None:
     if action == "register":
         if len(tokens) != 3:
             raise ValueError("Usage: rpp library <lib_name> register <file_name>")
-        return command_library_register_component(
+        return command_library_register_plugin(
             argparse.Namespace(library=library, file_name=tokens[2]),
             library_manager=library_manager,
         )
@@ -206,6 +261,37 @@ def command_library(args, library_manager=None) -> None:
         "Unknown library action. Expected one of: register, unregister, refresh, info, list. "
         "Supported forms: rpp library register <lib_path> [--link], rpp library refresh <lib_name>, "
         "rpp library info <lib_name>, rpp library list, or rpp library <lib_name> register <file_name>."
+    )
+
+def command_test(args) -> None:
+    tokens = args.test_args or []
+    if not tokens:
+        raise ValueError(
+            "Usage: rpp test <test_name> [<test_args> or rpp test <command> <command_args>]"
+        )
+
+
+    if tokens[0] == "setup_tmp_rpp_with_test_plugins":
+        test_args = tokens[1:] if len(tokens) > 1 else []
+        override = "--override" in test_args
+        test_args = [arg for arg in test_args if arg != "--override"]
+        if len(test_args) >= 1:
+            out_dir = Path(test_args[0]).expanduser().resolve()
+            handle = setup_tmp_rpp_with_test_plugins(out_dir, override=override)
+        else:
+            handle = setup_tmp_rpp_with_test_plugins(override=override)
+        json_payload = {
+            "home": str(handle.home),
+            "test_lib": handle.test_lib,
+            "out_dir": str(handle.out_dir),
+            "plugins": handle.plugins
+        }
+        print(json.dumps(json_payload, indent=2, sort_keys=False))
+        return
+
+    raise ValueError(
+        "Unknown test action. Expected one of: setup_tmp_rpp_with_test_plugins. "
+        "Supported forms: rpp test setup_tmp_rpp_with_test_plugins."
     )
 
 
@@ -262,13 +348,15 @@ def command_registry_info(args) -> None:
     paths = registry_api.get_rpp_paths()
     registry_path = rp.resolve_output_path(args.registry, paths["registry"])
     registry = registry_api.list_registered_plugin_types(registry_path)
+
     plugins = registry.get("PluginTypes", {})
+    tag = plugins.get(args.tag)
+    if tag is None:
+        tag = plugin_id_from_name(args.tag)
+        if tag is not None:
+            raise ValueError(f"Plugin '{args.tag}' not found in registry: {registry_path}")
 
-    plugin_data = plugins.get(args.tag)
-    if plugin_data is None:
-        raise ValueError(f"Plugin '{args.tag}' not found in registry: {registry_path}")
-
-    description_file = plugin_data.get("DescriptionFile")
+    description_file = plugins.get("DescriptionFile")
     if not description_file:
         raise ValueError(f"Plugin '{args.tag}' has no DescriptionFile in registry.")
 
