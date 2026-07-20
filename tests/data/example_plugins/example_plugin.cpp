@@ -3,19 +3,40 @@
 #include <rpp_schema/rpp_common/Command.hpp>
 
 
-std::map<std::string, std::string> COMPONENTS = {
-    {"ctl1", "rpp_common::MotionController2D"},
-};
+RPP_PARAM_STRUCT(TestStruct1,
+    RPP_MEMBER(int, width, 640),
+    RPP_MEMBER(std::string, height, "480"),
+    RPP_MEMBER(double, fps, 30.0)
+)
+
+RPP_PARAM_STRUCT(TestStruct2,
+    RPP_MEMBER(TestStruct1, struct1, TestStruct1()),
+    RPP_MEMBER(std::vector<int>, values, std::vector<int>{1, 2, 3})
+)
 
 class ComponentPlugin : public rpp_common::MotionController2D
 {
 
-public:
+
+    public:
+    RPP_COMPONENTS({
+        {"ctl_1", "test_lib::ComponentPlugin"},
+        {"ctl_2", "test_lib::ComponentPlugin_adapter_server"}
+    })
+
+    RPP_PARAMETERS({
+        rpp::params::ParameterDescription::create<int>("int_var", 1),
+        rpp::params::ParameterDescription::create<float>("float_var", 5.0f),
+        rpp::params::ParameterDescription::create<std::string>("str_var", "test"),
+        rpp::params::ParameterDescription::create<TestStruct1>("struct1_var", TestStruct1{}),
+        rpp::params::ParameterDescription::create<TestStruct2>("struct2_var", TestStruct2{})
+    })
+
     ComponentPlugin() = default;
 
     virtual ~ComponentPlugin() = default;
 
-    rpp_common::MotionController2D::VectorPlanar::Const step(rpp_common::MotionController2D::Pose2D::Const state, double dt) override
+    VectorPlanar::Const step(Pose2D::Const state, double dt) override
     {
 
         rpp_schema::rpp_common::Path2D path;
@@ -40,7 +61,7 @@ public:
         return std::move(vector);
     }
 
-    bool validate(rpp_common::MotionController2D::Pose2D::Const state) override
+    bool validate(Pose2D::Const state) override
     {
         auto x = state.position().x();
         return x > 5.0;
