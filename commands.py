@@ -4,8 +4,9 @@ import argparse
 import importlib
 import json
 from pathlib import Path
-from secrets import token_urlsafe
-from typing import Dict, Optional
+import re
+import tempfile
+from typing import Dict, Optional, Tuple
 
 
 from rpp_plugin_registrator.payload_builders import build_plugin_type_info_payload
@@ -15,8 +16,7 @@ from rpp_plugin_registrator.plugin_descriptors import (
 from rpp_plugin_registrator.plugin_validators import validate_plugin, validate_plugin_type
 from rpp_plugin_registrator.library_manager import LibraryManager
 import rpp_plugin_registrator.plugin_type_registrator as registry_api
-import rpp_plugin_registrator.registry_paths as rp
-from rpp_plugin_registrator.plugin_scaffold import scaffold_plugin
+import rpp_plugin_registrator.registry_config as rp
 from rpp_plugin_registrator.plugin_descriptors.core import PluginTypeInfo, PluginInfo, plugin_id_from_name
 from rpp_orchestrator.cli import main as workspace_main
 from rpp_orchestrator.workspace import create_workspace
@@ -97,7 +97,7 @@ def command_register(args, library_manager=None) -> int:
             return 1
 
         link_register = bool(getattr(args, "link", False))
-        registered_path = manager.register_plugin_library(str(lib_path), link_register=link_register, ask_dialog=False)
+        registered_path = manager.register_plugin_library(str(lib_path), link_register=link_register)
         if link_register:
             print(f"Linked library: {registered_path}")
         else:
@@ -114,25 +114,21 @@ def command_unregister(args, library_manager: LibraryManager = None) -> None:
         return
 
 
+def command_registry_setting(args) -> None:
+    expression = args.expression
 
-def command_scaffold(args) -> None:
-    output_path = Path(args.output).resolve()
+    if expression is None:
+        config = rp.get_config()
+        print(json.dumps(config, indent=2, sort_keys=False))
+        return
 
-    if hasattr(args, "plugin_type"):
-        splited = args.plugin_type.split("::") if "::" in args.plugin_type  else None
-        if splited is None or len(splited) != 2:
-            raise ValueError(f"Invalid plugin type format: {args.plugin_type}. Expected format: <library>::<plugin_name>")
-        lib_name = splited[0]
-        plugin_name = splited[1]
-    else:
-        splited = None
-        lib_name = args.library_name
-        plugin_name = args.plugin_name
+    setting_name, setting_value = expression.split("=")
+    setting_name = setting_name.strip()
+    setting_value = setting_value.strip()
 
-    lm = _get_library_manager()
-    desc = lm.get_plugin_type_info_from_lib(plugin_name, lib_name)
-    scaffold_plugin(desc, output_path, languages=[args.language])
-    print(f"Scaffolded {args.language} plugin source: {output_path}")
+    if not setting_name.isupper():
+        raise ValueError(f"Setting name must be uppercase: {setting_name}")
+    return rp.set_to_config(setting_name, setting_value)
 
 
 def command_library_refresh(args, library_manager=None) -> None:
@@ -296,7 +292,7 @@ def command_test(args) -> None:
 
 
 def command_init_home(args) -> None:
-    registry_api.ensure_rpp_layout(override_initialization=True)
+    registry_api.ensure_rpp_layout(override_initialization=args.override)
     paths = registry_api.get_rpp_paths()
     print(f"Initialized rpp home at: {paths['home']}")
     print(f"Descriptions: {paths['descriptions']}")
@@ -362,6 +358,82 @@ def command_registry_info(args) -> None:
 
     description_payload = registry_api.load_json(Path(description_file).expanduser().resolve())
     print(json.dumps(description_payload, indent=2, sort_keys=False))
+
+
+def command_compile(args) -> None:
+    rp.load_and_set_config(LibraryManager())
+    source_path = Path(args.source).expanduser().resolve()
+    if not source_path.exists() or not source_path.is_file():
+        raise ValueError(f"Plugin source file does not exist: {source_path}")
+
+    plugin_type_extensions = get_supported_plugin_type_extensions()
+    plugin_extensions = get_supported_plugin_extensions()
+    source_ext = source_path.suffix.lower()
+
+    if args.type == "plugin-type":
+        if source_ext not in plugin_type_extensions:
+            raise ValueError(f"Invalid plugin type source file extension:"
+                + f" {source_ext}. Supported extensions: {plugin_type_extensions}")
+        print(f"Compiled plugin type source: {source_path}")
+        return
+    if source_ext in [".cpp", ".hpp"]:
+        from rpp_plugin_registrator.plugin_registrator.cpp import compile_cpp_plugin
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_out_dir = Path(tmp_dir)
+
+            if args.plugin_type_name is None:
+                succ, plugin_type, class_name = \
+                    _cpp_try_extract_plugin_type_name_and_class_name_from_source(source_path)
+            else:
+                plugin_type = args.plugin_type_name
+                class_name = None
+                succ = True
+
+            if succ is False or plugin_type is None:
+                raise ValueError(f"Failed to extract plugin type name from source: {source_path}."
+                    + " Compile with --plugin-type-name to specify the plugin type name.")
+
+            plugin_type_library = plugin_type.split("::")[0]
+            err_msg, compile_cmd, out_file_path = compile_cpp_plugin(source_path, args.library,
+                plugin_type, plugin_type_library, tmp_out_dir,
+                class_name=class_name, suppress_warnings=False,
+                print_to_console=True, verbose=args.verbose)
+        if not err_msg:
+            print(f"Successfully compiled plugin source: {source_path}")
+        return
+
+    raise ValueError("Unsupported plugin source file extension:"
+        +f" {source_ext}. Supported extensions: {plugin_type_extensions + plugin_extensions}")
+
+def _cpp_try_extract_plugin_type_name_and_class_name_from_source(source_path: Path) \
+         -> Tuple[bool, Optional[str], Optional[str]]:
+    plugin_type_imports_re = r'^[ \t]*#[ \t]*include[ \t]*["<]([^">]*rpp_plugin_types[^">]*)[">]'
+    base_class_pattern = re.compile(r"""
+        class\s+
+        (\S+)
+        \s*:\s*
+        (?:public|private|protected)?
+        \s+(\S+)
+    """, re.VERBOSE | re.DOTALL)
+    with open(source_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+
+    imports = re.findall(plugin_type_imports_re, content, re.MULTILINE)
+    base_classes = base_class_pattern.findall(content)
+
+    for b in base_classes:
+        base_class = b[1]
+        plugin_type = base_class
+        plugin_name = plugin_type.split("::")[-1]
+        class_name = b[0]
+        for imp in imports:
+            if plugin_name in imp:
+                print("[RPP COMPILE]:"
+                      + f" Found plugin type '{plugin_type}' in source: {source_path}\n")
+                return True, plugin_type, class_name
+    return False, None, None
 
 
 def _render_bash_completion() -> str:

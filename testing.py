@@ -15,7 +15,18 @@ class RppHandle:
     plugins: list = None  # Optional: Store the list of plugins if needed
 
 
-def setup_tmp_rpp_with_test_plugins(out_dir: Path = None, override: bool = False) -> RppHandle:
+RPP_TESTING_PATH = Path(__file__).parent.parent.resolve() \
+    / "rpp_testing" / "rpp_testing"
+
+BLACKLISTED_PLUGINS = [
+    "example_plugin_with_dependencies"
+]
+
+
+def setup_tmp_rpp_with_test_plugins(
+        out_dir: Path = None,
+        override: bool = False,
+        component_whitelist: list = None) -> RppHandle:
     td = None
     if out_dir is None:
         td = tempfile.TemporaryDirectory()
@@ -40,16 +51,24 @@ def setup_tmp_rpp_with_test_plugins(out_dir: Path = None, override: bool = False
     library_manager = LibraryManager(rpp_home=home)
     library = library_manager.get_or_create_plugin_library(test_lib)
 
-    test_data_dir = Path(__file__).parent / "tests" / "data"
+    test_data_dir = RPP_TESTING_PATH / "data"
     library_plugins_dir = Path(library.path) / "plugins"
     library_plugins_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(test_data_dir / "example_plugins", library_plugins_dir, dirs_exist_ok=True)
     plugins = []
     for plugin_file in library_plugins_dir.glob("*.py"):
+        if plugin_file.stem in BLACKLISTED_PLUGINS:
+            continue
+        if component_whitelist is not None and plugin_file.name not in component_whitelist:
+            continue
         info = library_manager.register_plugin_from_source(plugin_file, test_lib)
         plugins.append({"PluginName": info["PluginName"], "SourceLanguage": info["SourceLanguage"]})
-    for plugin_type_file in library_plugins_dir.glob("*.cpp"):
-        info = library_manager.register_plugin_from_source(plugin_type_file, test_lib)
+    for plugin_file in library_plugins_dir.glob("*.cpp"):
+        if plugin_file.stem in BLACKLISTED_PLUGINS:
+            continue
+        if component_whitelist is not None and plugin_file.name not in component_whitelist:
+            continue
+        info = library_manager.register_plugin_from_source(plugin_file, test_lib)
         plugins.append({"PluginName": info["PluginName"], "SourceLanguage": info["SourceLanguage"]})
 
     return RppHandle(td=td, out_dir=out_dir, home=home, library_manager=library_manager, test_lib=test_lib, plugins=plugins)

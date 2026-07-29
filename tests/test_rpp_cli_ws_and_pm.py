@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rpp_plugin_registrator import registry_paths as rp
+from rpp_plugin_registrator import registry_config as rp
 import tempfile
 
 
@@ -40,7 +40,9 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertEqual(set(subparser_action.choices.keys()), {"init-home", "pm", "ws", "registry", "library", "completion", "test"})
+        self.assertEqual(set(subparser_action.choices.keys()),
+            {"init-home", "compile", "pm", "ws", \
+             "registry", "library", "completion", "test"})
 
         registry_parser = subparser_action.choices["registry"]
         registry_subparsers = next(

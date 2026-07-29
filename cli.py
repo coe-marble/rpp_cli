@@ -14,9 +14,10 @@ from commands import (
     command_pm,
     command_registry_info,
     command_list_registry,
-    command_scaffold,
     command_ws,
     command_ws_create,
+    command_compile,
+    command_registry_setting,
 )
 
 
@@ -27,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser(
         "init-home",
         help="create default ~/.rpp folder structure for plugin metadata",
+    )
+    init_parser.add_argument(
+        "--override",
+        action="store_true",
+        help="override existing ~/.rpp folder structure if it exists",
     )
     init_parser.set_defaults(func=command_init_home)
 
@@ -102,15 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     registry_info_parser.set_defaults(func=command_registry_info)
 
-    scaffold_parser = registry_subparsers.add_parser(
-        "scaffold",
-        help="create a starter plugin source file",
+    registry_config_parser = registry_subparsers.add_parser(
+        "config",
+        help="print registry configuration information",
     )
-    scaffold_parser.add_argument("--language", required=True, choices=["cpp", "python"])
-    scaffold_parser.add_argument("--plugin-id", required=True, help="plugin id and default plugin name")
-    scaffold_parser.add_argument("--class-name", help="plugin class name override")
-    scaffold_parser.add_argument("--output", required=True, help="output source file path")
-    scaffold_parser.set_defaults(func=command_scaffold)
+    registry_config_parser.add_argument(
+        "expression",
+        nargs="?",
+        default=None,
+        help="configuration expression to evaluate",
+    )
+    registry_config_parser.set_defaults(func=command_registry_setting)
+
 
     # Library commands
     library_parser = subparsers.add_parser(
@@ -135,6 +144,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="test command args, e.g. ''",
     )
     test_parser.set_defaults(func=command_test)
+
+
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="compile plugin source file into a shared library",
+    )
+    compile_parser.add_argument("source", help="path to plugin source file (.cpp or .py)")
+    compile_parser.add_argument("--plugin-type-name", help="plugin type name for C++ plugin compilation")
+    compile_parser.add_argument("--library", help="Library name for C++ plugin compilation")
+    compile_parser.add_argument("--verbose", help="enable verbose output", action="store_true")
+    compile_parser.add_argument("--type",
+        choices=["plugin", "plugin-type"],
+        default="plugin",
+        help="type of source to compile (default: plugin)")
+    compile_parser.set_defaults(func=command_compile)
 
 
     completion_parser = subparsers.add_parser(

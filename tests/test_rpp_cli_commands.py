@@ -16,6 +16,10 @@ def load_registrator_functions():
     import rpp_cli.commands as registrator
     return registrator
 
+#TODO: Fix this
+RPP_TESTING_PATH = Path(__file__).parent.parent.parent.resolve() \
+    / "rpp_testing" / "rpp_testing"
+FIXTURE_LIB_PATH = RPP_TESTING_PATH / "data" / "test_libs" / "test_lib_nn"
 
 class BaseRegistratorTests(unittest.TestCase):
 
@@ -38,18 +42,16 @@ class BaseRegistratorTests(unittest.TestCase):
         else:
             rpp_plugin_registrator.plugin_type_registrator.SCAFFOLD_LANGUAGES = ["python"]
 
-        import rpp_plugin_registrator.registry_paths as rp
-        original_home = rp.RPP_HOME
+        import rpp_plugin_registrator.registry_config as rp
         with tempfile.TemporaryDirectory() as td:
             home = Path(td) / ".rpp"
             home.mkdir(parents=True, exist_ok=True)
-            rp.RPP_HOME = home
             self.manager = self.reg.LibraryManager(rpp_home=home)
             try:
                 yield home
             finally:
-                rp.RPP_HOME = original_home
-
+                rp.reset_module()
+                rpp_plugin_registrator.plugin_type_registrator.reset_module()
 
 class CLICommandsTests(BaseRegistratorTests):
 
@@ -109,52 +111,36 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
             self.assertEqual(payload["ClassName"], "SamplePluginType")
             self.assertEqual(payload["ValidationResult"]["IsValid"], True)
 
-    def test_scaffold_python_calls_scaffold_command(self):
+    def test_registry_config_set_to_config_requires_uppercase_setting_name(self):
         with self._temp_registry_home() as td:
-            output_path = Path(td) / "generated" / "hello_plugin.py"
-            args = argparse.Namespace(
-                language="python",
-                plugin_name="MotionController2D",
-                library_name="rpp_common",
-                output=str(output_path),
-            )
+            with self.assertRaises(ValueError):
+                args = argparse.Namespace(expression="lowercase_setting=value")
+                self.reg.command_registry_setting(args)
 
-            import rpp_plugin_registrator.plugin_scaffold as scaffold_module
-            original_scaffold = scaffold_module.dispatch.scaffold_python_from_capnp
-            try:
-                scaffold_module.dispatch.scaffold_python_from_capnp = mock.Mock()
-
-                self.reg.command_scaffold(args)
-
-                scaffold_module.dispatch.scaffold_python_from_capnp.assert_called_once()
-            finally:
-                scaffold_module.dispatch.scaffold_python_from_capnp = original_scaffold
-
-
-    def test_scaffold_cpp_calls_scaffold_command(self):
+    def test_registry_config_set_to_config_sets_value_in_config_file(self):
         with self._temp_registry_home() as td:
-            output_path = Path(td) / "generated" / "hello_plugin.cpp"
-            args = argparse.Namespace(
-                language="cpp",
-                plugin_type="rpp_common::MotionController2D",
-                output=str(output_path),
-            )
+            setting_name = "USE_ROS2_COMPILATION"
+            setting_value = "true"
+            args = argparse.Namespace(expression=f"{setting_name}={setting_value}")
 
-            import rpp_plugin_registrator.plugin_scaffold as scaffold_module
-            original_scaffold = scaffold_module.dispatch.scaffold_cpp
-            try:
-                scaffold_module.dispatch.scaffold_cpp = mock.Mock()
+            import rpp_plugin_registrator.registry_config as rp
+            self.assertEqual(rp.get_setting(setting_name), False)
+            self.reg.command_registry_setting(args)
 
-                self.reg.command_scaffold(args)
+            config_path = rp.get_app_config_path()
+            self.assertTrue(config_path.exists(), f"Config file does not exist: {config_path}")
 
-                scaffold_module.dispatch.scaffold_cpp.assert_called_once()
-            finally:
-                scaffold_module.dispatch.scaffold_cpp = original_scaffold
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
 
+            self.assertIn(setting_name, config_data)
+            self.assertEqual(config_data[setting_name], True)
+            self.assertTrue(hasattr(rp, setting_name))
+            self.assertEqual(rp.get_setting(setting_name), True)
 
 
     def test_init_home_forces_initialization_override(self):
-        args = argparse.Namespace()
+        args = argparse.Namespace(override=True)
         with mock.patch.object(self.reg.registry_api, "ensure_rpp_layout") as ensure_layout:
             self.reg.command_init_home(args)
         ensure_layout.assert_called_once_with(override_initialization=True)
@@ -176,7 +162,7 @@ class LibraryCommandTests(BaseRegistratorTests):
 
     def test_library_registers_fixture_from_tests_data(self):
         with self._temp_registry_home() as home:
-            fixture_lib = Path(__file__).resolve().parent / "data" / "test_libs" / "test_lib_nn"
+            fixture_lib = FIXTURE_LIB_PATH
             self.assertTrue(fixture_lib.exists(), f"Missing fixture library: {fixture_lib}")
 
             args = argparse.Namespace(library_args=["register", str(fixture_lib)])
@@ -189,12 +175,12 @@ class LibraryCommandTests(BaseRegistratorTests):
 
     def test_library_registers_fixture_plugin_types_from_plugins_json(self):
         with self._temp_registry_home() as home:
-            fixture_lib = Path(__file__).resolve().parent / "data" / "test_libs" / "test_lib_nn"
+            fixture_lib = FIXTURE_LIB_PATH
             args = argparse.Namespace(library_args=["register", str(fixture_lib)])
 
             self.reg.command_library(args, self.manager)
 
-            manifest_path = home / "libraries" / "test_lib_nn" / "autogen" / "manifest.json"
+            manifest_path = home / "registry" / "libraries" / "test_lib_nn" / "manifest.json"
             self.assertTrue(manifest_path.exists())
 
             # test plugin type
@@ -203,28 +189,23 @@ class LibraryCommandTests(BaseRegistratorTests):
             self.assertIn("test_lib_nn::TestNNType", payload["PluginTypes"])
             nn_plugin = payload["PluginTypes"]["test_lib_nn::TestNNType"]
             self.assertEqual(nn_plugin["Library"], "test_lib_nn")
-            self.assertEqual(nn_plugin["ClassName"], "TestNNType")
             self.assertEqual(nn_plugin["PluginTypeName"], "test_lib_nn::TestNNType")
-            self.assertEqual(nn_plugin["FullyQualifiedClassName"], "<class 'rpp_plugin_types.test_lib_nn.TestNNType.TestNNType'>")
+            self.assertEqual(nn_plugin["ClassName"], "TestNNType")
 
             # test plugin1
             self.assertIn("Plugins", payload)
             self.assertIn("test_lib_nn::TestController", payload["Plugins"])
             plugin = payload["Plugins"]["test_lib_nn::TestController"]
             self.assertEqual(plugin["Library"], "test_lib_nn")
-            self.assertEqual(plugin["ClassName"], "TestController")
             self.assertEqual(plugin["PluginType"], "test_lib_nn::TestNNType")
-            self.assertEqual(plugin["FullyQualifiedClassName"], "<class 'TestController.TestController'>")
-            self.assertEqual(plugin["FullyQualifiedPluginClassName"], "<class 'rpp_plugin_types.test_lib_nn.TestNNType.TestNNType'>")
-            self.assertEqual(plugin["PluginTypeClassName"], "TestNNType")
+            self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController")
+            self.assertEqual(plugin["SourceLanguage"], "python")
 
             plugin = payload["Plugins"]["test_lib_nn::TestController_common"]
             self.assertEqual(plugin["Library"], "test_lib_nn")
-            self.assertEqual(plugin["ClassName"], "TestController_common")
             self.assertEqual(plugin["PluginType"], "rpp_common::MotionController2D")
-            self.assertEqual(plugin["FullyQualifiedClassName"], "<class 'TestController_common.TestController_common'>")
-            self.assertEqual(plugin["FullyQualifiedPluginClassName"], "<class 'rpp_plugin_types.rpp_common.MotionController2D.MotionController2D'>")
-            self.assertEqual(plugin["PluginTypeClassName"], "MotionController2D")
+            self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController_common")
+            self.assertEqual(plugin["SourceLanguage"], "python")
 
     def test_library_register_path_calls_register_component_library(self):
         with self._temp_registry_home():
@@ -241,7 +222,6 @@ class LibraryCommandTests(BaseRegistratorTests):
                 manager.register_plugin_library.assert_called_once_with(
                     str(lib_path.resolve()),
                     link_register=False,
-                    ask_dialog=False,
                 )
 
     def test_library_register_path_supports_link_install(self):
@@ -259,7 +239,6 @@ class LibraryCommandTests(BaseRegistratorTests):
                 manager.register_plugin_library.assert_called_once_with(
                     str(lib_path.resolve()),
                     link_register=True,
-                    ask_dialog=False,
                 )
 
     def test_library_register_reports_missing_path(self):
