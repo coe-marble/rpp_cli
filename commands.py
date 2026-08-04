@@ -183,18 +183,30 @@ def command_library_register_plugin(args, library_manager=None) -> None:
     if not source_path.exists() or not source_path.is_file():
         raise ValueError(f"Plugin source file does not exist: {source_path}")
     manager.register_plugin_from_source(str(source_path), args.library)
-    manager.refresh_plugin_library(args.library)
     print(f"Registered plugin file '{source_path}' into library '{args.library}'")
+
+def command_library_unregister_plugin(args, library_manager=None) -> None:
+    manager = _get_library_manager(library_manager)
+    plugin_name = args.plugin_name
+    library = args.library
+    removed = manager.unregister_plugin(plugin_name, library)
+    if removed:
+        print(f"Unregistered plugin '{plugin_name}' from library '{library}'")
+    else:
+        print(f"Plugin '{plugin_name}' not found in library '{library}'")
 
 
 def command_library(args, library_manager=None) -> None:
     tokens = args.library_args or []
     if not tokens:
-        raise ValueError(
+        print(
+            "Error: No library command provided. Expected one of: "
+            "register, unregister, refresh, info, list, or <lib_name>\n\n"
             "Usage: rpp library register <lib_path> | rpp library unregister <lib_name> | "
             "rpp library refresh <lib_name> | rpp library info <lib_name> | rpp library list | "
-            "rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh | rpp library <lib_name> info"
+            "rpp library <lib_name> register <file_name> | rpp library <lib_name> unregister <plugin_name>"
         )
+        return 1
 
     if tokens[0] == "register":
         link_register = False
@@ -204,7 +216,10 @@ def command_library(args, library_manager=None) -> None:
             register_tokens = [token for token in register_tokens if token != "--link"]
 
         if len(register_tokens) != 1:
-            raise ValueError("Usage: rpp library register <lib_path> [--link]")
+            print(
+                "Error: Invalid number of arguments for 'register' command. Expected one argument."
+                + " Usage: rpp library register <lib_path> [--link]")
+            return 1
         return command_register(
             argparse.Namespace(lib_path=register_tokens[0], link=link_register),
             library_manager=library_manager,
@@ -212,52 +227,60 @@ def command_library(args, library_manager=None) -> None:
 
     if tokens[0] == "unregister":
         if len(tokens) != 2:
-            raise ValueError("Usage: rpp library unregister <lib_name>")
+            print("Error: Invalid number of arguments for 'unregister' command. Expected one argument."
+                + " Usage: rpp library unregister <lib_name>")
+            return 1
         return command_unregister(argparse.Namespace(lib_name=tokens[1]), library_manager=library_manager)
 
     if tokens[0] == "refresh":
         if len(tokens) != 2:
-            raise ValueError("Usage: rpp library refresh <lib_name>")
+            print("Error: Invalid number of arguments for 'refresh' command. Expected one argument."
+                + " Usage: rpp library refresh <lib_name>")
+            return 1
         return command_library_refresh(argparse.Namespace(library=tokens[1]), library_manager=library_manager)
 
     if tokens[0] == "info":
         if len(tokens) != 2:
-            raise ValueError("Usage: rpp library info <lib_name>")
+            print("Error: Invalid number of arguments for 'info' command. Expected one argument."
+                + " Usage: rpp library info <lib_name>")
+            return 1
+
         return command_library_info(argparse.Namespace(library=tokens[1]), library_manager=library_manager)
 
     if tokens[0] == "list":
         if len(tokens) != 1:
-            raise ValueError("Usage: rpp library list")
+            print("Error: Invalid number of arguments for 'list' command. Expected no arguments."
+                + " Usage: rpp library list")
+            return 1
         return command_library_list(argparse.Namespace(), library_manager=library_manager)
 
     library = tokens[0]
-    if len(tokens) < 2:
-        raise ValueError("Usage: rpp library <lib_name> register <file_name> | rpp library <lib_name> refresh | rpp library <lib_name> info")
-
     action = tokens[1]
     if action == "register":
         if len(tokens) != 3:
-            raise ValueError("Usage: rpp library <lib_name> register <file_name>")
+            print("Error: Invalid number of arguments for 'register' command. Expected one argument."
+                + " Usage: rpp library <lib_name> register <file_name>")
+            return 1
         return command_library_register_plugin(
             argparse.Namespace(library=library, file_name=tokens[2]),
             library_manager=library_manager,
         )
+    if action == "unregister":
+        if len(tokens) != 3:
+            print("Error: Invalid number of arguments for 'unregister' command. Expected one argument."
+                + " Usage: rpp library <lib_name> unregister <plugin_name>")
+            return 1
+        return command_library_unregister_plugin(
+            argparse.Namespace(library=library, plugin_name=tokens[2]),
+            library_manager=library_manager,
+        )
 
-    if action == "refresh":
-        if len(tokens) != 2:
-            raise ValueError("Usage: rpp library <lib_name> refresh")
-        return command_library_refresh(argparse.Namespace(library=library), library_manager=library_manager)
-
-    if action == "info":
-        if len(tokens) != 2:
-            raise ValueError("Usage: rpp library <lib_name> info")
-        return command_library_info(argparse.Namespace(library=library), library_manager=library_manager)
-
-    raise ValueError(
+    print(
         "Unknown library action. Expected one of: register, unregister, refresh, info, list. "
         "Supported forms: rpp library register <lib_path> [--link], rpp library refresh <lib_name>, "
         "rpp library info <lib_name>, rpp library list, or rpp library <lib_name> register <file_name>."
     )
+    return 1
 
 def command_test(args) -> None:
     tokens = args.test_args or []
@@ -322,41 +345,33 @@ def command_ws_create(args) -> int:
 
 
 def command_list_registry(args) -> None:
-    paths = registry_api.get_rpp_paths()
-    registry_path = rp.resolve_output_path(args.registry, paths["registry"])
-    registry = registry_api.list_registered_plugin_types(registry_path)
-    plugins = registry.get("PluginTypes", {})
+    registry = registry_api.list_registered_plugin_types()
 
-    if args.format == "json":
+    if args.plugins:
+        plugins = registry.get("Plugins", {})
+    else:
+        plugins = registry.get("PluginTypes", {})
+
+    if args.json:
         print(json.dumps(registry, indent=2, sort_keys=False))
         return
 
-    print(f"Registry: {registry_path}")
     print(f"Total plugins: {len(plugins)}")
-    for plugin_id in sorted(plugins):
-        data = plugins[plugin_id]
+    for plugin_name in sorted(plugins):
+        data = plugins[plugin_name]
         source_language = data.get("SourceLanguage", "?")
-        plugin_name = data.get("Name", "?")
-        print(f"- {plugin_id} [{source_language}] {plugin_name}")
+        name = data.get("Name", "?")
+        print(f"- {plugin_name} [{source_language}] {name}")
 
 
 def command_registry_info(args) -> None:
-    paths = registry_api.get_rpp_paths()
-    registry_path = rp.resolve_output_path(args.registry, paths["registry"])
-    registry = registry_api.list_registered_plugin_types(registry_path)
+    path = rp.get_app_registry_plugin_type_json_path(args.tag)
 
-    plugins = registry.get("PluginTypes", {})
-    tag = plugins.get(args.tag)
-    if tag is None:
-        tag = plugin_id_from_name(args.tag)
-        if tag is not None:
-            raise ValueError(f"Plugin '{args.tag}' not found in registry: {registry_path}")
-
-    description_file = plugins.get("DescriptionFile")
-    if not description_file:
-        raise ValueError(f"Plugin '{args.tag}' has no DescriptionFile in registry.")
-
-    description_payload = registry_api.load_json(Path(description_file).expanduser().resolve())
+    if not path.exists():
+        print(f"No registry info found for tag '{args.tag}' at path: {path}")
+        return
+    description_payload = registry_api.load_json(
+        rp.get_app_registry_plugin_type_json_path(args.tag))
     print(json.dumps(description_payload, indent=2, sort_keys=False))
 
 

@@ -93,7 +93,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="path to registry JSON file",
     )
-    registry_list_parser.add_argument("--format", choices=["text", "json"], default="text")
+    registry_list_parser.add_argument("--json",
+        action="store_true", help="output registry as JSON")
+    registry_list_parser.add_argument("--plugins",
+        action="store_true", help="list plugins instead of plugin types")
     registry_list_parser.set_defaults(func=command_list_registry)
 
     registry_info_parser = registry_subparsers.add_parser(
