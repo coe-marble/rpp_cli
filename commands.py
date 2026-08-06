@@ -88,7 +88,7 @@ def command_describe(args) -> None:
     print(json.dumps(description, indent=2, sort_keys=False))
 
 
-def command_register(args, library_manager=None) -> int:
+def command_library_register(args, library_manager=None) -> int:
     if hasattr(args, "lib_path") and getattr(args, "lib_path") is not None:
         manager = _get_library_manager(library_manager)
         lib_path = Path(args.lib_path).expanduser().resolve()
@@ -106,12 +106,25 @@ def command_register(args, library_manager=None) -> int:
     return 1
 
 
-def command_unregister(args, library_manager: LibraryManager = None) -> None:
+def command_library_unregister(args, library_manager: LibraryManager = None) -> None:
     if hasattr(args, "lib_name") and getattr(args, "lib_name") is not None:
         manager = _get_library_manager(library_manager)
         removed = manager.remove_plugin_library(args.lib_name)
         print(f"Removed library: {removed}")
         return
+
+def command_library_create(args, library_manager=None) -> None:
+    manager = _get_library_manager(library_manager)
+    if hasattr(args, "path") and getattr(args, "path") is not None:
+        lib_path = Path(args.path).expanduser().resolve()
+    else:
+        lib_path = Path.cwd()
+    if not lib_path.exists():
+        lib_path.mkdir(parents=True, exist_ok=True)
+    created_path = manager.get_or_create_plugin_library(args.lib_name, str(lib_path))
+    print(f"Created library: {args.lib_name} at {created_path}")
+
+
 
 
 def command_registry_setting(args) -> None:
@@ -220,17 +233,28 @@ def command_library(args, library_manager=None) -> None:
                 "Error: Invalid number of arguments for 'register' command. Expected one argument."
                 + " Usage: rpp library register <lib_path> [--link]")
             return 1
-        return command_register(
+        return command_library_register(
             argparse.Namespace(lib_path=register_tokens[0], link=link_register),
             library_manager=library_manager,
         )
+
+    if tokens[0] == "create":
+        if len(tokens) != 2:
+            print("Error: Invalid number of arguments for 'create' command. Expected one argument."
+                + " Usage: rpp library create <lib_name>")
+            return 1
+        return command_library_create(
+            argparse.Namespace(lib_name=tokens[1], path=args.path if hasattr(args, "path") else None),
+            library_manager=library_manager
+        )
+
 
     if tokens[0] == "unregister":
         if len(tokens) != 2:
             print("Error: Invalid number of arguments for 'unregister' command. Expected one argument."
                 + " Usage: rpp library unregister <lib_name>")
             return 1
-        return command_unregister(argparse.Namespace(lib_name=tokens[1]), library_manager=library_manager)
+        return command_library_unregister(argparse.Namespace(lib_name=tokens[1]), library_manager=library_manager)
 
     if tokens[0] == "refresh":
         if len(tokens) != 2:
