@@ -121,6 +121,7 @@ def command_library_create(args, library_manager=None) -> None:
         lib_path = Path.cwd()
     if not lib_path.exists():
         lib_path.mkdir(parents=True, exist_ok=True)
+    print(lib_path)
     created_path = manager.get_or_create_plugin_library(args.lib_name, str(lib_path))
     print(f"Created library: {args.lib_name} at {created_path}")
 
@@ -239,12 +240,12 @@ def command_library(args, library_manager=None) -> None:
         )
 
     if tokens[0] == "create":
-        if len(tokens) != 2:
+        if len(tokens) != 2 and len(tokens) != 4:
             print("Error: Invalid number of arguments for 'create' command. Expected one argument."
                 + " Usage: rpp library create <lib_name>")
             return 1
         return command_library_create(
-            argparse.Namespace(lib_name=tokens[1], path=args.path if hasattr(args, "path") else None),
+            argparse.Namespace(lib_name=tokens[1], path=tokens[3] if len(tokens) == 4 else None),
             library_manager=library_manager
         )
 

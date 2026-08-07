@@ -60,7 +60,7 @@ class CLICommandsTests(BaseRegistratorTests):
             source = Path(td) / "sample_plugin.py"
             source.write_text(
                 """
-from rpp_plugin_types.rpp_common import MotionController2D
+from rpp_plugin_types.rpp_testing import MotionController2D
 
 class SamplePlugin(MotionController2D):
     def name(self) -> str:
@@ -82,7 +82,7 @@ class SamplePlugin(MotionController2D):
             payload = payload[0]
             self.assertEqual(payload["SourceFile"], str(source))
             self.assertEqual(payload["SourceLanguage"], "python")
-            self.assertEqual(payload["PluginType"], "rpp_common::MotionController2D")
+            self.assertEqual(payload["PluginType"], "rpp_testing::MotionController2D")
             self.assertEqual(payload["ClassName"], "SamplePlugin")
             self.assertEqual(payload["ValidationResult"]["IsValid"], True)
             self.assertIsNone(payload["ValidationResult"]["Message"])
@@ -203,7 +203,7 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             plugin = payload["Plugins"]["test_lib_nn::TestController_common"]
             self.assertEqual(plugin["Library"], "test_lib_nn")
-            self.assertEqual(plugin["PluginType"], "rpp_common::MotionController2D")
+            self.assertEqual(plugin["PluginType"], "rpp_testing::MotionController2D")
             self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController_common")
             self.assertEqual(plugin["SourceLanguage"], "python")
 
