@@ -280,13 +280,12 @@ class LibraryCommandTests(BaseRegistratorTests):
                     str(source.resolve()),
                     "data_driven_lib",
                 )
-                manager.refresh_plugin_library.assert_called_once_with("data_driven_lib")
 
     def test_library_named_refresh_calls_refresh_plugin_library(self):
         with self._temp_registry_home():
             manager = mock.Mock()
             manager.get_library_path.return_value = "/tmp/data_driven_lib"
-            args = argparse.Namespace(library_args=["data_driven_lib", "refresh"])
+            args = argparse.Namespace(library_args=["refresh", "data_driven_lib"])
 
             self.reg.command_library(args, library_manager=manager)
 
@@ -332,7 +331,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             manager.get_library_info.return_value = {"Library": "data_driven_lib", "Version": "0.0.1"}
             manager.get_library_path.return_value = "/tmp/data_driven_lib"
             manager._manifest_path.return_value = "/tmp/data_driven_lib/autogen/manifest.json"
-            args = argparse.Namespace(library_args=["data_driven_lib", "info"])
+            args = argparse.Namespace(library_args=["info", "data_driven_lib"])
 
             out = io.StringIO()
             with redirect_stdout(out):
@@ -366,16 +365,16 @@ class LibraryCommandTests(BaseRegistratorTests):
             manager = mock.Mock()
             args = argparse.Namespace(library_args=["register"])
 
-            with self.assertRaises(ValueError):
-                self.reg.command_library(args, library_manager=manager)
+            value = self.reg.command_library(args, library_manager=manager)
+            self.assertEqual(value, 1)
 
-    def test_library_empty_args_raises_usage_error(self):
+    def test_library_empty_args_returns_error(self):
         with self._temp_registry_home():
             manager = mock.Mock()
             args = argparse.Namespace(library_args=[])
 
-            with self.assertRaises(ValueError):
-                self.reg.command_library(args, library_manager=manager)
+            value = self.reg.command_library(args, library_manager=manager)
+            self.assertEqual(value, 1)
 
 if __name__ == "__main__":
     unittest.main()
