@@ -429,7 +429,6 @@ def command_compile(args) -> None:
                 plugin_type = args.plugin_type_name
                 class_name = None
                 succ = True
-
             if succ is False or plugin_type is None:
                 raise ValueError(f"Failed to extract plugin type name from source: {source_path}."
                     + " Compile with --plugin-type-name to specify the plugin type name.")
