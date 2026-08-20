@@ -15,7 +15,7 @@ class RppHandle:
     plugins: list = None  # Optional: Store the list of plugins if needed
 
 
-RPP_TESTING_PATH = Path(__file__).parent.parent.resolve() \
+RPP_TESTING_PATH = Path(__file__).parent.parent.parent.resolve() \
     / "rpp_testing" / "rpp_testing"
 
 BLACKLISTED_PLUGINS = [

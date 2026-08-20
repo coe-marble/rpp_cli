@@ -5,12 +5,11 @@ setup(
     name="rpp-cli",
     version="0.1.0",
     description="RPP command line interface",
-    py_modules=["cli", "commands", "testing"],
-    packages=find_packages(),
+    packages=find_packages(include=["rpp_cli", "rpp_cli.*"]),
     include_package_data=True,
     entry_points={
         "console_scripts": [
-            "rpp=cli:main",
+            "rpp=rpp_cli.cli:main",
         ]
     },
     install_requires=[],

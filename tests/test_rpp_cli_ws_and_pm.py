@@ -13,7 +13,7 @@ def load_cli_module():
     cli_root = workspace_root / "rpp_cli"
     sys.path.insert(0, str(cli_root))
 
-    import cli
+    import rpp_cli.cli as cli
 
     return cli
 
@@ -87,7 +87,7 @@ class RppCliCommandTests(unittest.TestCase):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws"])
 
-        with patch("commands.workspace_main", return_value=0) as mocked_workspace_main:
+        with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
             result = args.func(args)
 
         self.assertEqual(result, 0)
@@ -97,7 +97,7 @@ class RppCliCommandTests(unittest.TestCase):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws", "--root", "as"])
 
-        with patch("commands.workspace_main", return_value=0) as mocked_workspace_main:
+        with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
             result = args.func(args)
 
         self.assertEqual(result, 0)
@@ -117,7 +117,7 @@ class RppCliCommandTests(unittest.TestCase):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws", "create", "demo", "--root", ".", "--overwrite"])
 
-        with patch("commands.create_workspace") as mocked_create_workspace:
+        with patch("rpp_cli.commands.create_workspace") as mocked_create_workspace:
             result = args.func(args)
 
         self.assertEqual(result, 0)

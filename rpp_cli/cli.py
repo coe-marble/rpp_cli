@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 
-from commands import (
+from .commands import (
     command_completion,
     command_library,
     command_test,

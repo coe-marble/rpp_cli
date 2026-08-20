@@ -25,7 +25,7 @@ from rpp_plugin_registrator.supported_plugins_and_types import (
     get_supported_plugin_extensions
 )
 
-from testing import setup_tmp_rpp_with_test_plugins
+from .testing import setup_tmp_rpp_with_test_plugins
 
 
 def _make_description_payload(parsed, validation_result, is_plugin=False) -> Dict:
