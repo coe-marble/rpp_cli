@@ -1,6 +1,8 @@
+import json
 import tempfile
 
 from rpp_plugin_registrator.library_manager import LibraryManager
+import rpp_plugin_registrator.registry_config as rc
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
@@ -35,21 +37,32 @@ def setup_tmp_rpp_with_test_plugins(
         if not Path(out_dir).exists():
             raise ValueError(f"Provided out_dir '{out_dir}' does not exist.")
 
+
     test_lib = "test_lib"
     home = Path(out_dir) / ".rpp"
     if home.exists():
         if override:
             shutil.rmtree(home)
         else:
-            lm = LibraryManager(rpp_home=home)
+            lm = LibraryManager(rpp_home=home, skip_layout_check=True)
             plugins = lm.get_library_plugins(test_lib)
             plugin_return = [{
                 "PluginName": plugin["PluginName"], "SourceLanguage": plugin["SourceLanguage"]} for plugin in plugins.values()]
             return RppHandle(td=td, out_dir=out_dir, home=home, library_manager=lm, test_lib=test_lib, plugins=plugin_return)
 
     home.mkdir(parents=True, exist_ok=True)
-    library_manager = LibraryManager(rpp_home=home)
+    # load without new home so the true config is loaded
+    library_manager = LibraryManager(skip_layout_check=True)
+
+    true_config = rc.get_config()
+    if true_config is not None:
+        new_config_path = home / "config.json"
+        with open(new_config_path, "w", encoding="utf-8") as f:
+            json.dump(true_config, f, indent=4)
+
+    library_manager = LibraryManager(rpp_home=home, skip_layout_check=False)
     library = library_manager.get_or_create_plugin_library(test_lib)
+
 
     test_data_dir = RPP_TESTING_PATH / "data"
     library_plugins_dir = Path(library.path) / "plugins"

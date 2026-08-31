@@ -43,6 +43,7 @@ class BaseRegistratorTests(unittest.TestCase):
             rpp_plugin_registrator.plugin_type_registrator.SCAFFOLD_LANGUAGES = ["python"]
 
         import rpp_plugin_registrator.registry_config as rp
+        self.original_rpp_home = rp.RPP_HOME
         with tempfile.TemporaryDirectory() as td:
             home = Path(td) / ".rpp"
             home.mkdir(parents=True, exist_ok=True)
@@ -50,6 +51,7 @@ class BaseRegistratorTests(unittest.TestCase):
             try:
                 yield home
             finally:
+                rp.RPP_HOME = self.original_rpp_home
                 rp.reset_module()
                 rpp_plugin_registrator.plugin_type_registrator.reset_module()
 
