@@ -142,7 +142,9 @@ def command_registry_setting(args) -> None:
 
     if not setting_name.isupper():
         raise ValueError(f"Setting name must be uppercase: {setting_name}")
-    return rp.set_to_config(setting_name, setting_value)
+    if rp.set_to_config(setting_name, setting_value):
+        return 0
+    return 1
 
 
 def command_library_refresh(args, library_manager=None) -> None:
