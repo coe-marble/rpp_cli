@@ -38,7 +38,9 @@ from .commands import (
     command_ws_script_config_activate,
     command_ws_script_config_copy,
     command_ws_script_config_create,
+    command_ws_script_config_import,
     command_ws_script_config_list,
+    command_ws_script_list,
     command_ws_script_config_remove,
     command_ws_script_config_rename,
     command_ws_script_create,
@@ -140,6 +142,19 @@ def build_parser() -> argparse.ArgumentParser:
         dest="ws_script_command",
         required=True,
     )
+    ws_script_list_parser = ws_script_subparsers.add_parser(
+        "list",
+        help="list scripts in a workspace",
+    )
+    ws_script_list_parser.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        help="workspace root directory or registered workspace name",
+    )
+    ws_script_list_parser.add_argument("--json", action="store_true")
+    ws_script_list_parser.set_defaults(func=command_ws_script_list)
+
     ws_script_create_parser = ws_script_subparsers.add_parser(
         "create",
         help="create a workspace script",
@@ -227,6 +242,20 @@ def build_parser() -> argparse.ArgumentParser:
     ws_script_config_copy_parser.add_argument("source_configuration_name")
     ws_script_config_copy_parser.add_argument("configuration_name")
     ws_script_config_copy_parser.set_defaults(func=command_ws_script_config_copy)
+
+    ws_script_config_import_parser = ws_script_config_subparsers.add_parser(
+        "import",
+        help="import a configuration and its components from a linked script",
+    )
+    ws_script_config_import_parser.add_argument("workspace")
+    ws_script_config_import_parser.add_argument(
+        "source_script_name",
+        help="linked source script shown by rpp ws list",
+    )
+    ws_script_config_import_parser.add_argument("configuration_name")
+    ws_script_config_import_parser.set_defaults(
+        func=command_ws_script_config_import
+    )
 
     ws_script_config_rename_parser = ws_script_config_subparsers.add_parser(
         "rename", help="rename a script configuration"

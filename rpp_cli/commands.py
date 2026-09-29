@@ -676,6 +676,43 @@ def command_ws_info(args) -> int:
     return 0
 
 
+def command_ws_script_list(args, library_manager=None) -> int:
+    workspace = _open_existing_workspace(
+        _workspace_path_from_args(args), library_manager
+    )
+    scripts = []
+    for script in workspace.list_scripts():
+        description = script.load_description()
+        configurations = description.get("Configurations", {})
+        scripts.append({
+            "ScriptName": description.get("ScriptName", script.path.stem),
+            "Path": str(script.path),
+            "Linked": bool(description.get("Linked", False)),
+            "Library": description.get("ScriptLibrary"),
+            "ActiveConfiguration": description.get("ActiveConfiguration"),
+            "Configurations": list(configurations),
+        })
+
+    scripts.sort(key=lambda script: (script["ScriptName"], script["Path"]))
+    if args.json:
+        print(json.dumps(scripts, indent=2, sort_keys=False))
+        return 0
+
+    if not scripts:
+        print("No scripts found.")
+        return 0
+
+    for script in scripts:
+        source = "linked" if script["Linked"] else "local"
+        active_configuration = script["ActiveConfiguration"] or "none"
+        print(
+            "- {} [{}, active: {}]".format(
+                script["ScriptName"], source, active_configuration
+            )
+        )
+    return 0
+
+
 def _find_workspace_script(workspace: Workspace, script_reference: str):
     matches = []
     for script in workspace.list_scripts():
@@ -1029,6 +1066,43 @@ def command_ws_script_config_copy(args) -> int:
     return 0
 
 
+def command_ws_script_config_import(args, library_manager=None) -> int:
+    target_workspace = _open_existing_workspace(
+        args.workspace, library_manager
+    )
+    source_workspace_name, separator, source_script_name = (
+        args.source_script_name.partition("::")
+    )
+    if not separator or not source_workspace_name or not source_script_name:
+        raise ValueError(
+            "Source script must use the workspace::script form shown by "
+            "rpp ws list."
+        )
+
+    source_workspace = _open_existing_workspace(
+        source_workspace_name, library_manager
+    )
+    target_script = _find_workspace_script(
+        target_workspace, args.source_script_name
+    )
+    source_script = _find_workspace_script(
+        source_workspace, source_script_name
+    )
+    component_ids = target_workspace.import_script_configuration(
+        source_workspace,
+        source_script,
+        args.configuration_name,
+        target_script,
+        args.configuration_name,
+    )
+    print(
+        f"Imported configuration {args.configuration_name} into "
+        f"{target_script.path}."
+    )
+    print(f"Copied root components: {len(component_ids)}")
+    return 0
+
+
 def command_ws_script_config_rename(args) -> int:
     workspace, script = _workspace_script_from_args(args)
     workspace.rename_script_configuration(
@@ -1064,7 +1138,24 @@ def command_ws_script_remove(args) -> int:
 
 
 def command_ws_script_load(args, library_manager=None) -> int:
-    workspace = _open_existing_workspace(_workspace_path_from_args(args))
+    workspace = _open_existing_workspace(
+        _workspace_path_from_args(args), library_manager
+    )
+    for loaded_script in workspace.list_scripts():
+        description = loaded_script.load_description()
+        if not description.get("Linked"):
+            continue
+        if args.script_name not in {
+            description.get("ScriptName"),
+            description.get("ScriptLibrary"),
+        }:
+            continue
+        script_name = description.get("ScriptName", loaded_script.path.stem)
+        raise ValueError(
+            f"Registered script '{script_name}' is already loaded in "
+            f"workspace '{workspace.name}'."
+        )
+
     catalog = ScriptCatalog(_get_library_manager(library_manager))
     scripts = catalog.list_registered_scripts(
         exclude_library=workspace.name, workspace=workspace

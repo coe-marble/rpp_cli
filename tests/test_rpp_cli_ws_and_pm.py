@@ -344,6 +344,41 @@ class RppCliCommandTests(unittest.TestCase):
         )
 
 
+    def test_ws_script_load_reports_already_loaded_script(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args([
+            "ws",
+            "script",
+            "load",
+            "source_library::controller",
+            "--workspace",
+            "target-workspace",
+        ])
+        loaded_script = Mock()
+        loaded_script.path = Path("/tmp/source_library/controller.py")
+        loaded_script.load_description.return_value = {
+            "Linked": True,
+            "ScriptName": "source_library::controller",
+            "ScriptLibrary": "source_library",
+        }
+        workspace = Mock()
+        workspace.name = "target_library"
+        workspace.list_scripts.return_value = [loaded_script]
+        catalog = Mock()
+        manager = Mock()
+        manager.get_library_path.return_value = None
+
+        with patch(
+            "rpp_cli.commands.Workspace.workspace_exists", return_value=True
+        ), patch("rpp_cli.commands.open_workspace", return_value=workspace), patch(
+            "rpp_cli.commands.ScriptCatalog", return_value=catalog
+        ), self.assertRaisesRegex(ValueError, "is already loaded"):
+            self.cli.command_ws_script_load(
+                args, library_manager=manager
+            )
+
+        catalog.list_registered_scripts.assert_not_called()
+
     def test_ws_component_create_prefers_registered_workspace_name(self):
         workspace = Mock()
         component = Mock()
@@ -429,6 +464,93 @@ class RppCliCommandTests(unittest.TestCase):
         self.assertEqual(result, 0)
         workspace.create_script_configuration.assert_called_once_with(
             script, "Alternative"
+        )
+
+    def test_ws_script_config_import_copies_source_configuration(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args([
+            "ws",
+            "script",
+            "config",
+            "import",
+            "target-workspace",
+            "source-workspace::Source",
+            "Jet",
+        ])
+        target_script = Mock()
+        target_script.path = Path("/tmp/target/target.py")
+        target_script.load_description.return_value = {
+            "ScriptName": "source-workspace::Source"
+        }
+        source_script = Mock()
+        source_script.path = Path("/tmp/source/source.py")
+        source_script.load_description.return_value = {"ScriptName": "Source"}
+        target_workspace = Mock()
+        target_workspace.list_scripts.return_value = [target_script]
+        source_workspace = Mock()
+        source_workspace.list_scripts.return_value = [source_script]
+        target_workspace.import_script_configuration.return_value = {
+            "source-id": "target-id"
+        }
+        manager = Mock()
+        manager.get_library_path.return_value = None
+        output = io.StringIO()
+
+        with patch(
+            "rpp_cli.commands.Workspace.workspace_exists", return_value=True
+        ), patch(
+            "rpp_cli.commands.open_workspace",
+            side_effect=[target_workspace, source_workspace],
+        ), patch("sys.stdout", output):
+            result = self.cli.command_ws_script_config_import(
+                args, library_manager=manager
+            )
+
+        self.assertEqual(result, 0)
+        target_workspace.import_script_configuration.assert_called_once_with(
+            source_workspace,
+            source_script,
+            "Jet",
+            target_script,
+            "Jet",
+        )
+        self.assertEqual(
+            output.getvalue(),
+            "Imported configuration Jet into "
+            "/tmp/target/target.py.\nCopied root components: 1\n",
+        )
+
+    def test_ws_script_list_reports_link_and_active_configuration(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["ws", "script", "list", "jetski"])
+        script = Mock()
+        script.path = Path("/tmp/more_simulation/simulation.py")
+        script.load_description.return_value = {
+            "ScriptName": "more_simulation::simulation",
+            "Linked": True,
+            "ScriptLibrary": "more_simulation",
+            "ActiveConfiguration": "Jet",
+            "Configurations": {"Default": {}, "Jet": {}},
+        }
+        workspace = Mock()
+        workspace.list_scripts.return_value = [script]
+        manager = Mock()
+        manager.get_library_path.return_value = None
+        output = io.StringIO()
+
+        with patch(
+            "rpp_cli.commands.Workspace.workspace_exists", return_value=True
+        ), patch(
+            "rpp_cli.commands.open_workspace", return_value=workspace
+        ), patch("sys.stdout", output):
+            result = self.cli.command_ws_script_list(
+                args, library_manager=manager
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            output.getvalue(),
+            "- more_simulation::simulation [linked, active: Jet]\n",
         )
 
     def test_ws_script_config_list_marks_active_configuration(self):
