@@ -113,6 +113,43 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
             self.assertEqual(payload["ClassName"], "SamplePluginType")
             self.assertEqual(payload["ValidationResult"]["IsValid"], True)
 
+    def test_registry_config_get_reads_persisted_setting(self):
+        with self._temp_registry_home():
+            self.reg.rp.set_to_config("USE_ROS2_COMPILATION", "true")
+            self.reg.rp.reset_module()
+            args = argparse.Namespace(setting_name="USE_ROS2_COMPILATION")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_registry_config_get(args)
+
+            self.assertEqual(
+                json.loads(output.getvalue()),
+                {"USE_ROS2_COMPILATION": True},
+            )
+
+    def test_registry_get_setting_reads_persisted_compilation_mode(self):
+        with self._temp_registry_home():
+            self.reg.rp.set_to_config("USE_ROS2_COMPILATION", "true")
+            self.reg.rp.reset_module()
+
+            self.assertTrue(
+                self.reg.rp.get_setting("USE_ROS2_COMPILATION")
+            )
+
+    def test_registry_config_set_uses_structured_arguments(self):
+        with self._temp_registry_home():
+            args = argparse.Namespace(
+                setting_name="USE_ROS2_COMPILATION",
+                setting_value="true",
+            )
+
+            result = self.reg.command_registry_config_set(args)
+
+            self.assertEqual(result, 0)
+            self.assertTrue(self.reg.rp.get_setting("USE_ROS2_COMPILATION"))
+
+
     def test_registry_config_set_to_config_requires_uppercase_setting_name(self):
         with self._temp_registry_home() as td:
             with self.assertRaises(ValueError):
@@ -142,10 +179,21 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
 
 
     def test_init_home_forces_initialization_override(self):
-        args = argparse.Namespace(override=True)
+        args = argparse.Namespace(override=True, init_anot_only=False)
         with mock.patch.object(self.reg.registry_api, "ensure_rpp_layout") as ensure_layout:
             self.reg.command_init_home(args)
-        ensure_layout.assert_called_once_with(override_initialization=True)
+        ensure_layout.assert_called_once_with(
+            override_initialization=True,
+            init_anot_only=False,
+        )
+
+    def test_init_home_accepts_anot_only_option(self):
+        import rpp_cli.cli as cli
+
+        parser = cli.build_parser()
+        args = parser.parse_args(["init-home", "--init-anot-only"])
+
+        self.assertTrue(args.init_anot_only)
 
     def test_pm_command_invokes_gui_main(self):
         args = argparse.Namespace()
@@ -257,6 +305,37 @@ class LibraryCommandTests(BaseRegistratorTests):
             self.assertEqual(result, 1)
             self.assertIn("Library path does not exist:", out.getvalue())
 
+    def test_library_create_uses_rpp_library_root_by_default(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_or_create_plugin_library.return_value = mock.Mock(
+                path=Path("/tmp/example")
+            )
+            args = argparse.Namespace(library_args=["create", "example"])
+
+            result = self.reg.command_library(args, library_manager=manager)
+
+            self.assertIsNone(result)
+            manager.get_or_create_plugin_library.assert_called_once_with("example")
+
+    def test_library_create_linked_path_is_explicit(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                manager = mock.Mock()
+                manager.get_or_create_plugin_library.return_value = mock.Mock(
+                    path=Path(td) / "example"
+                )
+                args = argparse.Namespace(
+                    library_args=["create", "example", "--path", td]
+                )
+
+                self.reg.command_library(args, library_manager=manager)
+
+                manager.get_or_create_plugin_library.assert_called_once_with(
+                    "example", str(Path(td).resolve())
+                )
+
+
     def test_library_unregister_calls_remove_plugin_library(self):
         with self._temp_registry_home():
             manager = mock.Mock()
@@ -282,6 +361,37 @@ class LibraryCommandTests(BaseRegistratorTests):
                     str(source.resolve()),
                     "data_driven_lib",
                 )
+
+    def test_library_named_plugin_refresh_uses_registered_source(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                library_path = Path(td)
+                source = library_path / "plugins" / "sample.py"
+                source.parent.mkdir()
+                source.write_text("class Sample: pass\n", encoding="utf-8")
+                manager = mock.Mock()
+                manager.get_library_path.return_value = library_path
+                manager.get_plugin_info_from_lib.return_value = {
+                    "PluginName": "example::Sample",
+                    "SourceFile": "plugins/sample.py",
+                }
+                args = argparse.Namespace(
+                    library_args=["example", "refresh", "Sample"]
+                )
+
+                result = self.reg.command_library(args, library_manager=manager)
+
+                self.assertEqual(result, 0)
+                manager.get_plugin_info_from_lib.assert_called_once_with(
+                    "Sample", "example"
+                )
+                manager.unregister_plugin.assert_called_once_with(
+                    "example::Sample", "example", remove_from_json=False
+                )
+                manager.register_plugin_from_source.assert_called_once_with(
+                    str(source.resolve()), "example"
+                )
+
 
     def test_library_named_refresh_calls_refresh_plugin_library(self):
         with self._temp_registry_home():
@@ -361,6 +471,136 @@ class LibraryCommandTests(BaseRegistratorTests):
             manager.list_plugin_libraries.assert_called_once_with()
             payload = json.loads(out.getvalue())
             self.assertEqual([item["Name"] for item in payload], ["rpp", "rpp_control"])
+
+    def test_library_plugin_type_registers_source(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                source = Path(td) / "example.capnp"
+                source.write_text("@0xabcdefabcdefabcdef;\n", encoding="utf-8")
+                manager = mock.Mock()
+                manager.is_supported_plugin_type_file.return_value = True
+                manager.register_plugin_type_from_source.return_value = [
+                    {"PluginTypeName": "example::Example"}
+                ]
+                args = argparse.Namespace(
+                    library_args=[
+                        "example", "register", str(source), "--type", "--override"
+                    ]
+                )
+
+                self.reg.command_library(args, library_manager=manager)
+
+                manager.register_plugin_type_from_source.assert_called_once_with(
+                    source.resolve(), "example", override=True
+                )
+
+    def test_library_plugin_unregister_reports_success_without_return_value(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.unregister_plugin.return_value = None
+            args = argparse.Namespace(
+                library_args=["example", "unregister", "Sample"]
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                result = self.reg.command_library(args, library_manager=manager)
+
+            self.assertEqual(result, 0)
+            manager.unregister_plugin.assert_called_once_with("Sample", "example")
+            self.assertIn(
+                "Unregistered plugin 'Sample' from library 'example'",
+                output.getvalue(),
+            )
+
+
+    def test_library_plugin_type_unregisters_by_name(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.unregister_plugin_type.return_value = True
+            args = argparse.Namespace(
+                library_args=["example", "unregister", "Example", "--type"]
+            )
+
+            result = self.reg.command_library(args, library_manager=manager)
+
+            manager.unregister_plugin_type.assert_called_once_with("example::Example")
+            self.assertEqual(result, 0)
+
+    def test_library_plugin_type_lists_library_entries(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_library_plugin_types.return_value = {
+                "example::Example": {"PluginTypeName": "example::Example"}
+            }
+            args = argparse.Namespace(
+                library_args=["example", "list", "--type"]
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_library_plugin_types.assert_called_once_with("example")
+            self.assertIn("example::Example", json.loads(output.getvalue()))
+
+    def test_library_plugin_type_prints_info(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_plugin_type_info_from_lib.return_value = {
+                "PluginTypeName": "example::Example"
+            }
+            args = argparse.Namespace(
+                library_args=["example", "info", "Example", "--type"]
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_plugin_type_info_from_lib.assert_called_once_with(
+                "Example", "example"
+            )
+            self.assertEqual(
+                json.loads(output.getvalue())["PluginTypeName"],
+                "example::Example",
+            )
+
+    def test_library_named_list_returns_plugins(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_library_plugins.return_value = {
+                "example::Plugin": {"PluginName": "example::Plugin"}
+            }
+            args = argparse.Namespace(library_args=["example", "list"])
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_library_plugins.assert_called_once_with("example")
+            self.assertIn("example::Plugin", json.loads(output.getvalue()))
+
+    def test_library_named_info_returns_plugin_metadata(self):
+        with self._temp_registry_home():
+            manager = mock.Mock()
+            manager.get_plugin_info_from_lib.return_value = {
+                "PluginName": "example::Plugin"
+            }
+            args = argparse.Namespace(
+                library_args=["example", "info", "Plugin"]
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_library(args, library_manager=manager)
+
+            manager.get_plugin_info_from_lib.assert_called_once_with(
+                "Plugin", "example"
+            )
+            self.assertEqual(
+                json.loads(output.getvalue())["PluginName"], "example::Plugin"
+            )
 
     def test_library_register_usage_error_when_missing_path(self):
         with self._temp_registry_home():
