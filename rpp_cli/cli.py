@@ -531,6 +531,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true", help="output registry as JSON")
     registry_list_parser.add_argument("--plugins",
         action="store_true", help="list plugins instead of plugin types")
+    registry_list_parser.add_argument(
+        "--library",
+        help="filter entries to a single plugin library",
+    )
     registry_list_parser.set_defaults(func=command_list_registry)
 
     registry_info_parser = registry_subparsers.add_parser(
@@ -580,14 +584,32 @@ def build_parser() -> argparse.ArgumentParser:
     library_parser = subparsers.add_parser(
         "library",
         help="library-related commands",
+        description="Manage registered RPP libraries and their plugins.",
+        usage=(
+            "rpp library [-h] "
+            "{register,create,unregister,refresh,info,list,<library>} ..."
+        ),
+        epilog="""Commands:
+  register <library-path> [--link]
+  create <library-name> [--path <directory>]
+  unregister <library-name>
+  refresh <library-name>
+  info <library-name>
+  list
+
+Plugin commands:
+  <library> register <source> [--type] [--override]
+  <library> refresh <plugin-name> [<plugin-name> ...]
+  <library> unregister <name> [--type]
+  <library> list [--type]
+  <library> info <name> [--type]""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     library_parser.add_argument(
         "library_args",
         nargs=argparse.REMAINDER,
-        help=(
-            "library command args, e.g. 'register <lib_path>' or "
-            "'<library> register <source> [--type]'"
-        ),
+        metavar="COMMAND",
+        help="one of the commands listed below",
     )
     library_parser.set_defaults(func=command_library)
 

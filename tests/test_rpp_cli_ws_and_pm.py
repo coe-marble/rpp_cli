@@ -50,6 +50,20 @@ class RppCliCommandTests(unittest.TestCase):
         self.assertEqual(args.command, "library")
         self.assertEqual(args.library_args, ["list"])
 
+    def test_library_help_documents_refresh_command(self):
+        parser = self.cli.build_parser()
+
+        with self.assertRaises(SystemExit) as result:
+            with patch("sys.stdout", new_callable=io.StringIO) as output:
+                parser.parse_args(["library", "--help"])
+
+        self.assertEqual(result.exception.code, 0)
+        self.assertIn("refresh <library-name>", output.getvalue())
+        self.assertIn(
+            "<library> refresh <plugin-name> [<plugin-name> ...]",
+            output.getvalue(),
+        )
+
     def test_registry_list_command_exists(self):
         parser = self.cli.build_parser()
         subparser_action = next(

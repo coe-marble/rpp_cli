@@ -208,6 +208,99 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
         self.assertEqual(result, 0)
 
 
+    def test_registry_list_plugins_reads_plugin_metadata_files(self):
+        with self._temp_registry_home() as home:
+            plugin_path = (
+                home
+                / "registry"
+                / "libraries"
+                / "rpp_control"
+                / "rpp_plugins"
+                / "WaterjetAllocator.json"
+            )
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_text(
+                json.dumps(
+                    {
+                        "PluginName": "rpp_control::WaterjetAllocator",
+                        "Name": "WaterjetAllocator",
+                        "SourceLanguage": "cpp",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.reg.command_list_registry(
+                    argparse.Namespace(plugins=True, json=False, library=None)
+                )
+
+            self.assertIn(
+                "rpp_control::WaterjetAllocator", output.getvalue()
+            )
+
+    def test_registry_list_groups_unfiltered_entries_by_library(self):
+        registry = {
+            "PluginTypes": {
+                "rpp_common::Estimator2D": {
+                    "Library": "rpp_common",
+                    "Name": "Estimator2D",
+                    "SourceLanguage": "capnp",
+                },
+                "rpp_control::MotionController2D": {
+                    "Library": "rpp_control",
+                    "Name": "MotionController2D",
+                    "SourceLanguage": "capnp",
+                },
+            }
+        }
+        output = io.StringIO()
+
+        with mock.patch.object(
+            self.reg.registry_api,
+            "list_registered_plugin_types",
+            return_value=registry,
+        ), redirect_stdout(output):
+            self.reg.command_list_registry(
+                argparse.Namespace(plugins=False, json=False, library=None)
+            )
+
+        self.assertIn("rpp_common:", output.getvalue())
+        self.assertIn("rpp_control:", output.getvalue())
+
+    def test_registry_list_filters_entries_by_library(self):
+        registry = {
+            "PluginTypes": {
+                "rpp_common::Estimator2D": {
+                    "Library": "rpp_common",
+                    "Name": "Estimator2D",
+                    "SourceLanguage": "capnp",
+                },
+                "rpp_control::MotionController2D": {
+                    "Library": "rpp_control",
+                    "Name": "MotionController2D",
+                    "SourceLanguage": "capnp",
+                },
+            }
+        }
+        output = io.StringIO()
+
+        with mock.patch.object(
+            self.reg.registry_api,
+            "list_registered_plugin_types",
+            return_value=registry,
+        ), redirect_stdout(output):
+            self.reg.command_list_registry(
+                argparse.Namespace(
+                    plugins=False, json=False, library="rpp_control"
+                )
+            )
+
+        self.assertIn("rpp_control::MotionController2D", output.getvalue())
+        self.assertNotIn("rpp_common::Estimator2D", output.getvalue())
+
+
 class LibraryCommandTests(BaseRegistratorTests):
 
     def test_library_registers_fixture_from_tests_data(self):
@@ -362,6 +455,27 @@ class LibraryCommandTests(BaseRegistratorTests):
                     "data_driven_lib",
                 )
 
+    def test_library_named_plugin_register_accepts_override(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                source = Path(td) / "plugin.py"
+                source.write_text("class X: pass\n", encoding="utf-8")
+                manager = mock.Mock()
+                args = argparse.Namespace(
+                    library_args=[
+                        "data_driven_lib",
+                        "register",
+                        str(source),
+                        "--override",
+                    ]
+                )
+
+                self.reg.command_library(args, library_manager=manager)
+
+                manager.register_plugin_from_source.assert_called_once_with(
+                    str(source.resolve()), "data_driven_lib",
+                )
+
     def test_library_named_plugin_refresh_uses_registered_source(self):
         with self._temp_registry_home():
             with tempfile.TemporaryDirectory() as td:
@@ -390,6 +504,53 @@ class LibraryCommandTests(BaseRegistratorTests):
                 )
                 manager.register_plugin_from_source.assert_called_once_with(
                     str(source.resolve()), "example"
+                )
+
+    def test_library_named_plugin_refresh_accepts_multiple_plugins(self):
+        with self._temp_registry_home():
+            with tempfile.TemporaryDirectory() as td:
+                library_path = Path(td)
+                first_source = library_path / "plugins" / "first.py"
+                second_source = library_path / "plugins" / "second.py"
+                first_source.parent.mkdir()
+                first_source.write_text("class First: pass\n", encoding="utf-8")
+                second_source.write_text(
+                    "class Second: pass\n", encoding="utf-8")
+                manager = mock.Mock()
+                manager.get_library_path.return_value = library_path
+                manager.get_plugin_info_from_lib.side_effect = [
+                    {
+                        "PluginName": "example::First",
+                        "SourceFile": "plugins/first.py",
+                    },
+                    {
+                        "PluginName": "example::Second",
+                        "SourceFile": "plugins/second.py",
+                    },
+                ]
+                args = argparse.Namespace(
+                    library_args=["example", "refresh", "First", "Second"]
+                )
+
+                result = self.reg.command_library(args, library_manager=manager)
+
+                self.assertEqual(result, 0)
+                self.assertEqual(
+                    manager.get_plugin_info_from_lib.call_args_list,
+                    [mock.call("First", "example"),
+                     mock.call("Second", "example")],
+                )
+                self.assertEqual(
+                    manager.unregister_plugin.call_args_list,
+                    [mock.call("example::First", "example",
+                               remove_from_json=False),
+                     mock.call("example::Second", "example",
+                               remove_from_json=False)],
+                )
+                self.assertEqual(
+                    manager.register_plugin_from_source.call_args_list,
+                    [mock.call(str(first_source.resolve()), "example"),
+                     mock.call(str(second_source.resolve()), "example")],
                 )
 
 

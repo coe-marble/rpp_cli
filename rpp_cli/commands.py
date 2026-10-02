@@ -433,7 +433,7 @@ def command_library(args, library_manager=None) -> None:
     ]
 
     if action == "register":
-        if len(action_tokens) != 1 or (override and not is_plugin_type):
+        if len(action_tokens) != 1:
             print(
                 "Usage: rpp library <library> register <source> "
                 "[--type] [--override]"
@@ -449,18 +449,29 @@ def command_library(args, library_manager=None) -> None:
                 library_manager=library_manager,
             )
         return command_library_register_plugin(
-            argparse.Namespace(library=library, file_name=action_tokens[0]),
+            argparse.Namespace(
+                library=library,
+                file_name=action_tokens[0],
+                override=override,
+            ),
             library_manager=library_manager,
         )
 
     if action == "refresh":
-        if len(action_tokens) != 1 or is_plugin_type or override:
-            print("Usage: rpp library <library> refresh <plugin-name>")
+        if not action_tokens or is_plugin_type or override:
+            print(
+                "Usage: rpp library <library> refresh <plugin-name> "
+                "[<plugin-name> ...]"
+            )
             return 1
-        return command_library_refresh_plugin(
-            argparse.Namespace(library=library, plugin_name=action_tokens[0]),
-            library_manager=library_manager,
-        )
+        for plugin_name in action_tokens:
+            result = command_library_refresh_plugin(
+                argparse.Namespace(library=library, plugin_name=plugin_name),
+                library_manager=library_manager,
+            )
+            if result != 0:
+                return result
+        return 0
 
     if action == "unregister":
         if len(action_tokens) != 1 or override:
@@ -1239,24 +1250,65 @@ def command_ws_create(args, library_manager=None) -> int:
     return 0
 
 
-def command_list_registry(args) -> None:
-    registry = registry_api.list_registered_plugin_types()
+def _list_registered_plugins() -> Dict[str, Any]:
+    plugins = {}
+    libraries_path = rp.get_app_registry_path() / "libraries"
+    if not libraries_path.is_dir():
+        return plugins
 
+    for plugin_path in sorted(libraries_path.glob("*/rpp_plugins/*.json")):
+        plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+        plugin_name = plugin.get("PluginName")
+        if not isinstance(plugin_name, str) or not plugin_name:
+            raise ValueError(
+                f"Plugin registry file has no PluginName: {plugin_path}"
+            )
+        plugins[plugin_name] = plugin
+    return plugins
+
+
+def command_list_registry(args) -> None:
     if args.plugins:
-        plugins = registry.get("Plugins", {})
+        registry = {"Plugins": _list_registered_plugins()}
+        plugins = registry["Plugins"]
     else:
+        registry = registry_api.list_registered_plugin_types()
         plugins = registry.get("PluginTypes", {})
+
+    library = args.library
+    if library:
+        plugins = {
+            plugin_name: data
+            for plugin_name, data in plugins.items()
+            if data.get("Library") == library
+            or plugin_name.partition("::")[0] == library
+        }
+        registry = dict(registry)
+        registry["Plugins" if args.plugins else "PluginTypes"] = plugins
 
     if args.json:
         print(json.dumps(registry, indent=2, sort_keys=False))
         return
 
     print(f"Total plugins: {len(plugins)}")
-    for plugin_name in sorted(plugins):
-        data = plugins[plugin_name]
-        source_language = data.get("SourceLanguage", "?")
-        name = data.get("Name", "?")
-        print(f"- {plugin_name} [{source_language}] {name}")
+    if library:
+        print(f"\n{library}:")
+        entries_by_library = {library: plugins}
+    else:
+        entries_by_library = {}
+        for plugin_name, data in plugins.items():
+            entry_library = data.get(
+                "Library", plugin_name.partition("::")[0] or "unknown")
+            entries_by_library.setdefault(entry_library, {})[plugin_name] = data
+
+    for entry_library in sorted(entries_by_library):
+        if not library:
+            print(f"\n{entry_library}:")
+        for plugin_name in sorted(entries_by_library[entry_library]):
+            data = entries_by_library[entry_library][plugin_name]
+            source_language = data.get("SourceLanguage", "?")
+            name = data.get("Name", "?")
+            print(f"- {plugin_name} [{source_language}] {name}")
 
 
 def command_registry_info(args) -> None:
