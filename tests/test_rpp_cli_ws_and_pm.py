@@ -334,6 +334,7 @@ class RppCliCommandTests(unittest.TestCase):
         ])
         workspace = Mock()
         workspace.name = "target_library"
+        workspace.list_scripts.return_value = []
         registered_script = Mock()
         registered_script.script_name = "source_library::controller"
         registered_script.library = "source_library"

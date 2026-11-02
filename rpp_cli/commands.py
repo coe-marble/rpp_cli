@@ -595,16 +595,23 @@ def command_ws(args) -> int:
 def _open_existing_workspace(
         workspace_path: str | Path, library_manager=None
 ) -> Workspace:
-    manager = _get_library_manager(library_manager)
+    if library_manager is not None:
+        registered_path = library_manager.get_library_path(str(workspace_path))
+        if registered_path is not None:
+            workspace_root = Path(registered_path).expanduser().resolve()
+            if Workspace.workspace_exists(workspace_root):
+                return open_workspace(workspace_root)
+
+    requested_path = Path(workspace_path).expanduser().resolve()
+    if Workspace.workspace_exists(requested_path):
+        return open_workspace(requested_path)
+
+    manager = library_manager if library_manager is not None else _get_library_manager()
     registered_path = manager.get_library_path(str(workspace_path))
     if registered_path is not None:
         workspace_root = Path(registered_path).expanduser().resolve()
         if Workspace.workspace_exists(workspace_root):
             return open_workspace(workspace_root)
-
-    requested_path = Path(workspace_path).expanduser().resolve()
-    if Workspace.workspace_exists(requested_path):
-        return open_workspace(requested_path)
 
     raise ValueError(
         f"Workspace '{workspace_path}' was not found. Expected a workspace path "
@@ -736,7 +743,7 @@ def _find_workspace_script(workspace: Workspace, script_reference: str):
         }
         try:
             references.add(script.path.relative_to(workspace.root).as_posix())
-        except ValueError:
+        except (TypeError, ValueError):
             pass
         if script_reference in references:
             matches.append(script)
@@ -1167,7 +1174,7 @@ def command_ws_script_load(args, library_manager=None) -> int:
             f"workspace '{workspace.name}'."
         )
 
-    catalog = ScriptCatalog(_get_library_manager(library_manager))
+    catalog = ScriptCatalog(library_manager)
     scripts = catalog.list_registered_scripts(
         exclude_library=workspace.name, workspace=workspace
     )

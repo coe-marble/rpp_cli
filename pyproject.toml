@@ -6,6 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "rpp-cli"
 version = "0.1.0"
 description = "RPP command line interface"
+requires-python = ">=3.10"
+dependencies = [
+    "rpp-plugin-registrator>=0.1,<0.2",
+    "rpp-orchestrator>=0.1,<0.2",
+    "rpp-py>=0.1,<0.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
 
 [project.scripts]
 rpp = "rpp_cli.cli:main"
