@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import os
+import sys
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
@@ -1329,7 +1330,7 @@ def command_registry_info(args) -> None:
     print(json.dumps(description_payload, indent=2, sort_keys=False))
 
 
-def command_compile(args) -> None:
+def command_compile(args) -> int:
     rp.load_and_set_config(LibraryManager())
     source_path = Path(args.source).expanduser().resolve()
     if not source_path.exists() or not source_path.is_file():
@@ -1344,7 +1345,7 @@ def command_compile(args) -> None:
             raise ValueError(f"Invalid plugin type source file extension:"
                 + f" {source_ext}. Supported extensions: {plugin_type_extensions}")
         print(f"Compiled plugin type source: {source_path}")
-        return
+        return 0
     if source_ext in [".cpp", ".hpp"]:
         from rpp_plugin_registrator.plugin_registrator.cpp import compile_cpp_plugin
 
@@ -1367,9 +1368,11 @@ def command_compile(args) -> None:
                 plugin_type, plugin_type_library, tmp_out_dir,
                 class_name=class_name, suppress_warnings=False,
                 print_to_console=True, verbose=args.verbose)
-        if not err_msg:
-            print(f"Successfully compiled plugin source: {source_path}")
-        return
+        if err_msg:
+            print(err_msg, file=sys.stderr)
+            return 1
+        print(f"Successfully compiled plugin source: {source_path}")
+        return 0
 
     raise ValueError("Unsupported plugin source file extension:"
         +f" {source_ext}. Supported extensions: {plugin_type_extensions + plugin_extensions}")
