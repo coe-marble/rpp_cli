@@ -3,42 +3,37 @@ import io
 import json
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+import pytest
 
 from rpp_plugin_registrator import registry_config as rp
 
 
-def load_cli_module():
+def load_cli_module(monkeypatch):
     workspace_root = Path(__file__).resolve().parents[2]
     cli_root = workspace_root / "rpp_cli"
-    sys.path.insert(0, str(cli_root))
+    monkeypatch.syspath_prepend(str(cli_root))
 
     import rpp_cli.cli as cli
 
     return cli
 
 
-class RppCliCommandTests(unittest.TestCase):
-    def setUp(self):
-
-        self.cli = load_cli_module()
-        self._home_dir = tempfile.TemporaryDirectory()
-        self.home = Path(self._home_dir.name)
+class TestRppCliCommand:
+    @pytest.fixture(autouse=True)
+    def _rpp_home(self, monkeypatch, tmp_path):
+        self.cli = load_cli_module(monkeypatch)
+        self.home = tmp_path / "rpp-home"
         self.home.mkdir(parents=True, exist_ok=True)
-        self._original_rpp_home = rp.RPP_HOME
-        rp.RPP_HOME = self.home
-
-    def tearDown(self):
-        rp.RPP_HOME = self._original_rpp_home
-        self._home_dir.cleanup()
+        monkeypatch.setattr(rp, "RPP_HOME", self.home)
+        yield
 
     def test_global_rpp_home_configures_registry_home(self):
         target_home = self.home / "isolated-rpp-home"
         self.cli.configure_rpp_home(str(target_home))
 
-        self.assertEqual(rp.RPP_HOME, target_home.resolve())
+        assert rp.RPP_HOME == target_home.resolve()
 
     def test_global_rpp_home_is_parsed_before_command(self):
         parser = self.cli.build_parser()
@@ -46,23 +41,20 @@ class RppCliCommandTests(unittest.TestCase):
             "--rpp-home", "/tmp/rpp-home", "library", "list"
         ])
 
-        self.assertEqual(args.rpp_home, "/tmp/rpp-home")
-        self.assertEqual(args.command, "library")
-        self.assertEqual(args.library_args, ["list"])
+        assert args.rpp_home == "/tmp/rpp-home"
+        assert args.command == "library"
+        assert args.library_args == ["list"]
 
     def test_library_help_documents_refresh_command(self):
         parser = self.cli.build_parser()
 
-        with self.assertRaises(SystemExit) as result:
+        with pytest.raises(SystemExit) as result:
             with patch("sys.stdout", new_callable=io.StringIO) as output:
                 parser.parse_args(["library", "--help"])
 
-        self.assertEqual(result.exception.code, 0)
-        self.assertIn("refresh <library-name>", output.getvalue())
-        self.assertIn(
-            "<library> refresh <plugin-name> [<plugin-name> ...]",
-            output.getvalue(),
-        )
+        assert result.value.code == 0
+        assert "refresh <library-name>" in output.getvalue()
+        assert "<library> refresh <plugin-name> [<plugin-name> ...]" in output.getvalue()
 
     def test_registry_list_command_exists(self):
         parser = self.cli.build_parser()
@@ -72,9 +64,8 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertEqual(set(subparser_action.choices.keys()),
-            {"init-home", "compile", "pm", "ws", \
-             "registry", "library", "completion", "test"})
+        assert set(subparser_action.choices.keys()) == {"init-home", "compile", "pm", "ws", \
+             "registry", "library", "completion", "test"}
 
         registry_parser = subparser_action.choices["registry"]
         registry_subparsers = next(
@@ -83,8 +74,8 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertIn("list", registry_subparsers.choices)
-        self.assertIn("info", registry_subparsers.choices)
+        assert "list" in registry_subparsers.choices
+        assert "info" in registry_subparsers.choices
 
     def test_registry_config_parser_accepts_structured_commands(self):
         parser = self.cli.build_parser()
@@ -96,16 +87,16 @@ class RppCliCommandTests(unittest.TestCase):
             "true",
         ])
 
-        self.assertEqual(args.registry_config_command, "set")
-        self.assertEqual(args.setting_name, "USE_ROS2_COMPILATION")
-        self.assertEqual(args.setting_value, "true")
+        assert args.registry_config_command == "set"
+        assert args.setting_name == "USE_ROS2_COMPILATION"
+        assert args.setting_value == "true"
 
     def test_registry_config_defaults_to_list(self):
         parser = self.cli.build_parser()
         args = parser.parse_args(["registry", "config"])
 
-        self.assertIsNone(args.registry_config_command)
-        self.assertEqual(args.func.__name__, "command_registry_config_list")
+        assert args.registry_config_command is None
+        assert args.func.__name__ == "command_registry_config_list"
 
 
     def test_pm_command_exists(self):
@@ -116,7 +107,7 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertIn("pm", subparser_action.choices)
+        assert "pm" in subparser_action.choices
 
     def test_ws_command_exists(self):
         parser = self.cli.build_parser()
@@ -126,7 +117,7 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertIn("ws", subparser_action.choices)
+        assert "ws" in subparser_action.choices
         ws_parser = subparser_action.choices["ws"]
         ws_subparsers = next(
             action
@@ -134,11 +125,8 @@ class RppCliCommandTests(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
 
-        self.assertEqual(
-            set(ws_subparsers.choices.keys()),
-            {"component", "create", "info", "list", "script"},
-        )
-        self.assertTrue(hasattr(ws_parser, "get_default"))
+        assert set(ws_subparsers.choices.keys()) == {"component", "create", "info", "list", "script"}
+        assert hasattr(ws_parser, "get_default")
 
     def test_ws_defaults_to_gui(self):
         parser = self.cli.build_parser()
@@ -147,7 +135,7 @@ class RppCliCommandTests(unittest.TestCase):
         with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         mocked_workspace_main.assert_called_once_with([])
 
     def test_ws_root_opens_gui_in_folder(self):
@@ -157,17 +145,17 @@ class RppCliCommandTests(unittest.TestCase):
         with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         mocked_workspace_main.assert_called_once_with(["--root", "as"])
 
     def test_ws_info_parser_accepts_workspace_root(self):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws", "info", "demo-workspace", "--json"])
 
-        self.assertEqual(args.ws_command, "info")
-        self.assertEqual(args.workspace, "demo-workspace")
-        self.assertTrue(args.json)
-        self.assertEqual(args.func.__name__, "command_ws_info")
+        assert args.ws_command == "info"
+        assert args.workspace == "demo-workspace"
+        assert args.json
+        assert args.func.__name__ == "command_ws_info"
 
     def test_ws_info_prints_workspace_summary(self):
         parser = self.cli.build_parser()
@@ -197,10 +185,8 @@ class RppCliCommandTests(unittest.TestCase):
             with patch("sys.stdout", output):
                 result = args.func(args)
 
-        self.assertEqual(result, 0)
-        self.assertEqual(
-            json.loads(output.getvalue()),
-            {
+        assert result == 0
+        assert json.loads(output.getvalue()) == {
                 "Name": "demo-workspace",
                 "Root": "/tmp/demo-workspace",
                 "ScriptCount": 1,
@@ -219,8 +205,7 @@ class RppCliCommandTests(unittest.TestCase):
                         "Folder": "/tmp/demo-workspace/.rppws/parts/main",
                     }
                 ],
-            },
-        )
+            }
 
 
     def test_ws_info_defaults_to_current_workspace_and_prints_names(self):
@@ -245,8 +230,8 @@ class RppCliCommandTests(unittest.TestCase):
         ):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
-        self.assertEqual(output.getvalue(), "Scripts:\n- Demo\nComponents:\n- Main\n")
+        assert result == 0
+        assert output.getvalue() == "Scripts:\n- Demo\nComponents:\n- Main\n"
 
 
     def test_ws_script_create_uses_workspace_relative_directory(self):
@@ -277,7 +262,7 @@ class RppCliCommandTests(unittest.TestCase):
             ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
                 result = args.func(args)
 
-            self.assertEqual(result, 0)
+            assert result == 0
             workspace.create_script.assert_called_once_with(
                 scripts_path / "demo.py", language="python"
             )
@@ -316,11 +301,8 @@ class RppCliCommandTests(unittest.TestCase):
             ):
                 result = self.cli.command_ws_list(args, library_manager=manager)
 
-            self.assertEqual(result, 0)
-            self.assertEqual(
-                output.getvalue(),
-                f"- workspace_library: {workspace_root.resolve()}\n",
-            )
+            assert result == 0
+            assert output.getvalue() == f"- workspace_library: {workspace_root.resolve()}\n"
 
     def test_ws_script_load_links_registered_script(self):
         parser = self.cli.build_parser()
@@ -350,7 +332,7 @@ class RppCliCommandTests(unittest.TestCase):
         ):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.link_registered_script.assert_called_once_with(
             registered_script.path,
             "source_library::controller",
@@ -387,7 +369,7 @@ class RppCliCommandTests(unittest.TestCase):
             "rpp_cli.commands.Workspace.workspace_exists", return_value=True
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace), patch(
             "rpp_cli.commands.ScriptCatalog", return_value=catalog
-        ), self.assertRaisesRegex(ValueError, "is already loaded"):
+        ), pytest.raises(ValueError, match="is already loaded"):
             self.cli.command_ws_script_load(
                 args, library_manager=manager
             )
@@ -418,7 +400,7 @@ class RppCliCommandTests(unittest.TestCase):
                 args, library_manager=manager
             )
 
-        self.assertEqual(result, 0)
+        assert result == 0
         manager.get_library_path.assert_called_once_with("jetski")
         open_workspace.assert_called_once_with(Path("/tmp/jetski").resolve())
         workspace.create_component.assert_called_once_with(
@@ -447,7 +429,7 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.create_component.assert_called_once_with(
             "Controller", "rpp_control::Controller"
         )
@@ -476,7 +458,7 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.create_script_configuration.assert_called_once_with(
             script, "Alternative"
         )
@@ -521,7 +503,7 @@ class RppCliCommandTests(unittest.TestCase):
                 args, library_manager=manager
             )
 
-        self.assertEqual(result, 0)
+        assert result == 0
         target_workspace.import_script_configuration.assert_called_once_with(
             source_workspace,
             source_script,
@@ -529,10 +511,9 @@ class RppCliCommandTests(unittest.TestCase):
             target_script,
             "Jet",
         )
-        self.assertEqual(
-            output.getvalue(),
+        assert output.getvalue() == (
             "Imported configuration Jet into "
-            "/tmp/target/target.py.\nCopied root components: 1\n",
+            "/tmp/target/target.py.\nCopied root components: 1\n"
         )
 
     def test_ws_script_list_reports_link_and_active_configuration(self):
@@ -562,11 +543,8 @@ class RppCliCommandTests(unittest.TestCase):
                 args, library_manager=manager
             )
 
-        self.assertEqual(result, 0)
-        self.assertEqual(
-            output.getvalue(),
-            "- more_simulation::simulation [linked, active: Jet]\n",
-        )
+        assert result == 0
+        assert output.getvalue() == "- more_simulation::simulation [linked, active: Jet]\n"
 
     def test_ws_script_config_list_marks_active_configuration(self):
         parser = self.cli.build_parser()
@@ -592,8 +570,8 @@ class RppCliCommandTests(unittest.TestCase):
         ):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
-        self.assertEqual(output.getvalue(), "* Default\n  Alternative\n")
+        assert result == 0
+        assert output.getvalue() == "* Default\n  Alternative\n"
 
 
     def test_ws_script_remove_resolves_script_name(self):
@@ -613,7 +591,7 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.remove_script.assert_called_once_with(script.path)
 
 
@@ -639,7 +617,7 @@ class RppCliCommandTests(unittest.TestCase):
             ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
                 result = args.func(args)
 
-            self.assertEqual(result, 0)
+            assert result == 0
             workspace.load_script.assert_called_once_with(source.resolve())
 
 
@@ -647,10 +625,10 @@ class RppCliCommandTests(unittest.TestCase):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws", "create", "jetski"])
 
-        self.assertEqual(args.command, "ws")
-        self.assertEqual(args.ws_command, "create")
-        self.assertEqual(args.library, "jetski")
-        self.assertEqual(args.func.__name__, "command_ws_create")
+        assert args.command == "ws"
+        assert args.ws_command == "create"
+        assert args.library == "jetski"
+        assert args.func.__name__ == "command_ws_create"
 
     def test_ws_create_initializes_the_selected_library(self):
         parser = self.cli.build_parser()
@@ -663,7 +641,7 @@ class RppCliCommandTests(unittest.TestCase):
         with patch("rpp_cli.commands.create_workspace") as mocked_create_workspace:
             result = self.cli.command_ws_create(args, library_manager=manager)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         manager.get_library_path.assert_called_once_with("jetski")
         manager.is_valid_plugin_library.assert_called_once_with(
             str(library_root)
@@ -709,17 +687,11 @@ class RppCliCommandTests(unittest.TestCase):
             "2.5",
         ])
 
-        self.assertEqual(assign_args.func.__name__, "command_ws_component_assign")
-        self.assertEqual(assign_args.script_name, "Controller")
-        self.assertEqual(assign_args.configuration_name, "Maneuver")
-        self.assertEqual(
-            subcomponent_args.func.__name__,
-            "command_ws_component_subcomponent_create",
-        )
-        self.assertEqual(
-            parameter_args.func.__name__,
-            "command_ws_component_parameter_set",
-        )
+        assert assign_args.func.__name__ == "command_ws_component_assign"
+        assert assign_args.script_name == "Controller"
+        assert assign_args.configuration_name == "Maneuver"
+        assert subcomponent_args.func.__name__ == "command_ws_component_subcomponent_create"
+        assert parameter_args.func.__name__ == "command_ws_component_parameter_set"
 
     def test_ws_component_assign_resolves_displayed_script_name(self):
         parser = self.cli.build_parser()
@@ -749,7 +721,7 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.assign_component_to_script.assert_called_once_with(
             script,
             "actuator",
@@ -784,9 +756,9 @@ class RppCliCommandTests(unittest.TestCase):
         with patch(
             "rpp_cli.commands.Workspace.workspace_exists", return_value=True
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
-            self.assertEqual(rename_args.func(rename_args), 0)
-            self.assertEqual(duplicate_args.func(duplicate_args), 0)
-            self.assertEqual(remove_args.func(remove_args), 0)
+            assert rename_args.func(rename_args) == 0
+            assert duplicate_args.func(duplicate_args) == 0
+            assert remove_args.func(remove_args) == 0
 
         workspace.write_part_descriptor.assert_called_once_with(
             component.folder, component
@@ -826,7 +798,7 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.remove_subcomponent.assert_called_once_with(
             "vehicle-id",
             "sensor",
@@ -862,12 +834,8 @@ class RppCliCommandTests(unittest.TestCase):
         ), patch("rpp_cli.commands.open_workspace", return_value=workspace):
             result = args.func(args)
 
-        self.assertEqual(result, 0)
+        assert result == 0
         workspace.component_parameter_store.save.assert_called_once_with(
             source_folder,
             {"enabled": True, "gain": 2.5},
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

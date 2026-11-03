@@ -4,12 +4,12 @@ import io
 import json
 import sys
 import tempfile
-import unittest
 from contextlib import contextmanager
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 import rpp_plugin_registrator.plugin_type_registrator as ptyp_reg_api
+import pytest
 
 
 def load_registrator_functions():
@@ -21,17 +21,12 @@ RPP_TESTING_PATH = Path(__file__).parent.parent.parent.resolve() \
     / "rpp_testing" / "rpp_testing"
 FIXTURE_LIB_PATH = RPP_TESTING_PATH / "data" / "test_libs" / "test_lib_nn"
 
-class BaseRegistratorTests(unittest.TestCase):
-
-
-    def setUp(self):
-        super().setUp()
+class BaseRegistratorTests:
+    @pytest.fixture(autouse=True)
+    def _registrator(self, monkeypatch):
         self.reg = load_registrator_functions()
-        self.path_at_start = sys.path.copy()
-
-    def tearDown(self):
-        self.reg = None
-        sys.path = self.path_at_start
+        monkeypatch.setattr(sys, "path", sys.path.copy())
+        yield
 
     @contextmanager
     def _temp_registry_home(self, scaffold_languages=None):
@@ -55,7 +50,7 @@ class BaseRegistratorTests(unittest.TestCase):
                 rp.reset_module()
                 rpp_plugin_registrator.plugin_type_registrator.reset_module()
 
-class CLICommandsTests(BaseRegistratorTests):
+class TestCLICommands(BaseRegistratorTests):
 
     def test_describe_plugin_prints_json_to_stdout(self):
         with self._temp_registry_home() as td:
@@ -82,12 +77,12 @@ class SamplePlugin(MotionController2D):
 
             payload = json.loads(out.getvalue())
             payload = payload[0]
-            self.assertEqual(payload["SourceFile"], str(source))
-            self.assertEqual(payload["SourceLanguage"], "python")
-            self.assertEqual(payload["PluginType"], "rpp_testing::MotionController2D")
-            self.assertEqual(payload["ClassName"], "SamplePlugin")
-            self.assertEqual(payload["ValidationResult"]["IsValid"], True)
-            self.assertIsNone(payload["ValidationResult"]["Message"])
+            assert payload["SourceFile"] == str(source)
+            assert payload["SourceLanguage"] == "python"
+            assert payload["PluginType"] == "rpp_testing::MotionController2D"
+            assert payload["ClassName"] == "SamplePlugin"
+            assert payload["ValidationResult"]["IsValid"] == True
+            assert payload["ValidationResult"]["Message"] is None
 
 
     def test_describe_plugin_type_prints_json_to_stdout(self):
@@ -109,9 +104,9 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
 
             payload = json.loads(out.getvalue())
             payload = payload[0]
-            self.assertEqual(payload["SourceLanguage"], "capnp")
-            self.assertEqual(payload["ClassName"], "SamplePluginType")
-            self.assertEqual(payload["ValidationResult"]["IsValid"], True)
+            assert payload["SourceLanguage"] == "capnp"
+            assert payload["ClassName"] == "SamplePluginType"
+            assert payload["ValidationResult"]["IsValid"] == True
 
     def test_registry_config_get_reads_persisted_setting(self):
         with self._temp_registry_home():
@@ -123,19 +118,14 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
             with redirect_stdout(output):
                 self.reg.command_registry_config_get(args)
 
-            self.assertEqual(
-                json.loads(output.getvalue()),
-                {"USE_ROS2_COMPILATION": True},
-            )
+            assert json.loads(output.getvalue()) == {"USE_ROS2_COMPILATION": True}
 
     def test_registry_get_setting_reads_persisted_compilation_mode(self):
         with self._temp_registry_home():
             self.reg.rp.set_to_config("USE_ROS2_COMPILATION", "true")
             self.reg.rp.reset_module()
 
-            self.assertTrue(
-                self.reg.rp.get_setting("USE_ROS2_COMPILATION")
-            )
+            assert self.reg.rp.get_setting("USE_ROS2_COMPILATION")
 
     def test_registry_config_set_uses_structured_arguments(self):
         with self._temp_registry_home():
@@ -146,13 +136,13 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
 
             result = self.reg.command_registry_config_set(args)
 
-            self.assertEqual(result, 0)
-            self.assertTrue(self.reg.rp.get_setting("USE_ROS2_COMPILATION"))
+            assert result == 0
+            assert self.reg.rp.get_setting("USE_ROS2_COMPILATION")
 
 
     def test_registry_config_set_to_config_requires_uppercase_setting_name(self):
         with self._temp_registry_home() as td:
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 args = argparse.Namespace(expression="lowercase_setting=value")
                 self.reg.command_registry_setting(args)
 
@@ -163,19 +153,19 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
             args = argparse.Namespace(expression=f"{setting_name}={setting_value}")
 
             import rpp_plugin_registrator.registry_config as rp
-            self.assertEqual(rp.get_setting(setting_name), False)
+            assert rp.get_setting(setting_name) == False
             self.reg.command_registry_setting(args)
 
             config_path = rp.get_app_config_path()
-            self.assertTrue(config_path.exists(), f"Config file does not exist: {config_path}")
+            assert config_path.exists(), f"Config file does not exist: {config_path}"
 
             with open(config_path, "r", encoding="utf-8") as f:
                 config_data = json.load(f)
 
-            self.assertIn(setting_name, config_data)
-            self.assertEqual(config_data[setting_name], True)
-            self.assertTrue(hasattr(rp, setting_name))
-            self.assertEqual(rp.get_setting(setting_name), True)
+            assert setting_name in config_data
+            assert config_data[setting_name] == True
+            assert hasattr(rp, setting_name)
+            assert rp.get_setting(setting_name) == True
 
 
     def test_init_home_forces_initialization_override(self):
@@ -193,7 +183,7 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
         parser = cli.build_parser()
         args = parser.parse_args(["init-home", "--init-anot-only"])
 
-        self.assertTrue(args.init_anot_only)
+        assert args.init_anot_only
 
     def test_pm_command_invokes_gui_main(self):
         args = argparse.Namespace()
@@ -205,7 +195,7 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
 
         import_module.assert_called_once_with("rpp_plugin_registrator.gui")
         fake_gui_module.main.assert_called_once_with()
-        self.assertEqual(result, 0)
+        assert result == 0
 
 
     def test_registry_list_plugins_reads_plugin_metadata_files(self):
@@ -236,9 +226,7 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
                     argparse.Namespace(plugins=True, json=False, library=None)
                 )
 
-            self.assertIn(
-                "rpp_control::WaterjetAllocator", output.getvalue()
-            )
+            assert "rpp_control::WaterjetAllocator" in output.getvalue()
 
     def test_registry_list_groups_unfiltered_entries_by_library(self):
         registry = {
@@ -266,8 +254,8 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
                 argparse.Namespace(plugins=False, json=False, library=None)
             )
 
-        self.assertIn("rpp_common:", output.getvalue())
-        self.assertIn("rpp_control:", output.getvalue())
+        assert "rpp_common:" in output.getvalue()
+        assert "rpp_control:" in output.getvalue()
 
     def test_registry_list_filters_entries_by_library(self):
         registry = {
@@ -297,16 +285,16 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
                 )
             )
 
-        self.assertIn("rpp_control::MotionController2D", output.getvalue())
-        self.assertNotIn("rpp_common::Estimator2D", output.getvalue())
+        assert "rpp_control::MotionController2D" in output.getvalue()
+        assert "rpp_common::Estimator2D" not in output.getvalue()
 
 
-class LibraryCommandTests(BaseRegistratorTests):
+class TestLibraryCommands(BaseRegistratorTests):
 
     def test_library_registers_fixture_from_tests_data(self):
         with self._temp_registry_home() as home:
             fixture_lib = FIXTURE_LIB_PATH
-            self.assertTrue(fixture_lib.exists(), f"Missing fixture library: {fixture_lib}")
+            assert fixture_lib.exists(), f"Missing fixture library: {fixture_lib}"
 
             args = argparse.Namespace(library_args=["register", str(fixture_lib)])
             self.reg.command_library(args, self.manager)
@@ -314,7 +302,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             libraries = self.manager.list_plugin_libraries()
             library_names = {lib["Name"] for lib in libraries}
 
-            self.assertIn("test_lib_nn", library_names)
+            assert "test_lib_nn" in library_names
 
     def test_library_registers_fixture_plugin_types_from_plugins_json(self):
         with self._temp_registry_home() as home:
@@ -324,31 +312,31 @@ class LibraryCommandTests(BaseRegistratorTests):
             self.reg.command_library(args, self.manager)
 
             manifest_path = home / "registry" / "libraries" / "test_lib_nn" / "manifest.json"
-            self.assertTrue(manifest_path.exists())
+            assert manifest_path.exists()
 
             # test plugin type
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertIn("PluginTypes", payload)
-            self.assertIn("test_lib_nn::TestNNType", payload["PluginTypes"])
+            assert "PluginTypes" in payload
+            assert "test_lib_nn::TestNNType" in payload["PluginTypes"]
             nn_plugin = payload["PluginTypes"]["test_lib_nn::TestNNType"]
-            self.assertEqual(nn_plugin["Library"], "test_lib_nn")
-            self.assertEqual(nn_plugin["PluginTypeName"], "test_lib_nn::TestNNType")
-            self.assertEqual(nn_plugin["ClassName"], "TestNNType")
+            assert nn_plugin["Library"] == "test_lib_nn"
+            assert nn_plugin["PluginTypeName"] == "test_lib_nn::TestNNType"
+            assert nn_plugin["ClassName"] == "TestNNType"
 
             # test plugin1
-            self.assertIn("Plugins", payload)
-            self.assertIn("test_lib_nn::TestController", payload["Plugins"])
+            assert "Plugins" in payload
+            assert "test_lib_nn::TestController" in payload["Plugins"]
             plugin = payload["Plugins"]["test_lib_nn::TestController"]
-            self.assertEqual(plugin["Library"], "test_lib_nn")
-            self.assertEqual(plugin["PluginType"], "test_lib_nn::TestNNType")
-            self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController")
-            self.assertEqual(plugin["SourceLanguage"], "python")
+            assert plugin["Library"] == "test_lib_nn"
+            assert plugin["PluginType"] == "test_lib_nn::TestNNType"
+            assert plugin["PluginName"] == "test_lib_nn::TestController"
+            assert plugin["SourceLanguage"] == "python"
 
             plugin = payload["Plugins"]["test_lib_nn::TestController_common"]
-            self.assertEqual(plugin["Library"], "test_lib_nn")
-            self.assertEqual(plugin["PluginType"], "rpp_testing::MotionController2D")
-            self.assertEqual(plugin["PluginName"], "test_lib_nn::TestController_common")
-            self.assertEqual(plugin["SourceLanguage"], "python")
+            assert plugin["Library"] == "test_lib_nn"
+            assert plugin["PluginType"] == "rpp_testing::MotionController2D"
+            assert plugin["PluginName"] == "test_lib_nn::TestController_common"
+            assert plugin["SourceLanguage"] == "python"
 
     def test_library_register_path_calls_register_component_library(self):
         with self._temp_registry_home():
@@ -395,8 +383,8 @@ class LibraryCommandTests(BaseRegistratorTests):
                 result = self.reg.command_library(args, library_manager=manager)
 
             manager.register_plugin_library.assert_not_called()
-            self.assertEqual(result, 1)
-            self.assertIn("Library path does not exist:", out.getvalue())
+            assert result == 1
+            assert "Library path does not exist:" in out.getvalue()
 
     def test_library_create_uses_rpp_library_root_by_default(self):
         with self._temp_registry_home():
@@ -408,7 +396,7 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             result = self.reg.command_library(args, library_manager=manager)
 
-            self.assertIsNone(result)
+            assert result is None
             manager.get_or_create_plugin_library.assert_called_once_with("example")
 
     def test_library_create_linked_path_is_explicit(self):
@@ -495,7 +483,7 @@ class LibraryCommandTests(BaseRegistratorTests):
 
                 result = self.reg.command_library(args, library_manager=manager)
 
-                self.assertEqual(result, 0)
+                assert result == 0
                 manager.get_plugin_info_from_lib.assert_called_once_with(
                     "Sample", "example"
                 )
@@ -534,24 +522,15 @@ class LibraryCommandTests(BaseRegistratorTests):
 
                 result = self.reg.command_library(args, library_manager=manager)
 
-                self.assertEqual(result, 0)
-                self.assertEqual(
-                    manager.get_plugin_info_from_lib.call_args_list,
-                    [mock.call("First", "example"),
-                     mock.call("Second", "example")],
-                )
-                self.assertEqual(
-                    manager.unregister_plugin.call_args_list,
-                    [mock.call("example::First", "example",
+                assert result == 0
+                assert manager.get_plugin_info_from_lib.call_args_list == [mock.call("First", "example"),
+                     mock.call("Second", "example")]
+                assert manager.unregister_plugin.call_args_list == [mock.call("example::First", "example",
                                remove_from_json=False),
                      mock.call("example::Second", "example",
-                               remove_from_json=False)],
-                )
-                self.assertEqual(
-                    manager.register_plugin_from_source.call_args_list,
-                    [mock.call(str(first_source.resolve()), "example"),
-                     mock.call(str(second_source.resolve()), "example")],
-                )
+                               remove_from_json=False)]
+                assert manager.register_plugin_from_source.call_args_list == [mock.call(str(first_source.resolve()), "example"),
+                     mock.call(str(second_source.resolve()), "example")]
 
 
     def test_library_named_refresh_calls_refresh_plugin_library(self):
@@ -577,8 +556,8 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             manager.get_library_path.assert_called_once_with("missing_lib")
             manager.refresh_plugin_library.assert_not_called()
-            self.assertEqual(result, 1)
-            self.assertIn("Library 'missing_lib' does not exist.", out.getvalue())
+            assert result == 1
+            assert "Library 'missing_lib' does not exist." in out.getvalue()
 
     def test_library_info_calls_get_library_info(self):
         with self._temp_registry_home():
@@ -594,9 +573,9 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             manager.get_library_info.assert_called_once_with("rpp_control", only_registered=True)
             payload = json.loads(out.getvalue())
-            self.assertEqual(payload["Library"], "rpp_control")
-            self.assertIn("Plugins", payload)
-            self.assertIn("PluginTypes", payload)
+            assert payload["Library"] == "rpp_control"
+            assert "Plugins" in payload
+            assert "PluginTypes" in payload
 
     def test_library_named_info_calls_get_library_info(self):
         with self._temp_registry_home():
@@ -612,9 +591,9 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             manager.get_library_info.assert_called_once_with("data_driven_lib", only_registered=True)
             payload = json.loads(out.getvalue())
-            self.assertEqual(payload["Library"], "data_driven_lib")
-            self.assertIn("Plugins", payload)
-            self.assertIn("PluginTypes", payload)
+            assert payload["Library"] == "data_driven_lib"
+            assert "Plugins" in payload
+            assert "PluginTypes" in payload
 
     def test_library_list_calls_list_plugin_libraries(self):
         with self._temp_registry_home():
@@ -631,7 +610,7 @@ class LibraryCommandTests(BaseRegistratorTests):
 
             manager.list_plugin_libraries.assert_called_once_with()
             payload = json.loads(out.getvalue())
-            self.assertEqual([item["Name"] for item in payload], ["rpp", "rpp_control"])
+            assert [item["Name"] for item in payload] == ["rpp", "rpp_control"]
 
     def test_library_plugin_type_registers_source(self):
         with self._temp_registry_home():
@@ -667,12 +646,9 @@ class LibraryCommandTests(BaseRegistratorTests):
             with redirect_stdout(output):
                 result = self.reg.command_library(args, library_manager=manager)
 
-            self.assertEqual(result, 0)
+            assert result == 0
             manager.unregister_plugin.assert_called_once_with("Sample", "example")
-            self.assertIn(
-                "Unregistered plugin 'Sample' from library 'example'",
-                output.getvalue(),
-            )
+            assert "Unregistered plugin 'Sample' from library 'example'" in output.getvalue()
 
 
     def test_library_plugin_type_unregisters_by_name(self):
@@ -686,7 +662,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             result = self.reg.command_library(args, library_manager=manager)
 
             manager.unregister_plugin_type.assert_called_once_with("example::Example")
-            self.assertEqual(result, 0)
+            assert result == 0
 
     def test_library_plugin_type_lists_library_entries(self):
         with self._temp_registry_home():
@@ -703,7 +679,7 @@ class LibraryCommandTests(BaseRegistratorTests):
                 self.reg.command_library(args, library_manager=manager)
 
             manager.get_library_plugin_types.assert_called_once_with("example")
-            self.assertIn("example::Example", json.loads(output.getvalue()))
+            assert "example::Example" in json.loads(output.getvalue())
 
     def test_library_plugin_type_prints_info(self):
         with self._temp_registry_home():
@@ -722,10 +698,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             manager.get_plugin_type_info_from_lib.assert_called_once_with(
                 "Example", "example"
             )
-            self.assertEqual(
-                json.loads(output.getvalue())["PluginTypeName"],
-                "example::Example",
-            )
+            assert json.loads(output.getvalue())["PluginTypeName"] == "example::Example"
 
     def test_library_named_list_returns_plugins(self):
         with self._temp_registry_home():
@@ -740,7 +713,7 @@ class LibraryCommandTests(BaseRegistratorTests):
                 self.reg.command_library(args, library_manager=manager)
 
             manager.get_library_plugins.assert_called_once_with("example")
-            self.assertIn("example::Plugin", json.loads(output.getvalue()))
+            assert "example::Plugin" in json.loads(output.getvalue())
 
     def test_library_named_info_returns_plugin_metadata(self):
         with self._temp_registry_home():
@@ -759,9 +732,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             manager.get_plugin_info_from_lib.assert_called_once_with(
                 "Plugin", "example"
             )
-            self.assertEqual(
-                json.loads(output.getvalue())["PluginName"], "example::Plugin"
-            )
+            assert json.loads(output.getvalue())["PluginName"] == "example::Plugin"
 
     def test_library_register_usage_error_when_missing_path(self):
         with self._temp_registry_home():
@@ -769,7 +740,7 @@ class LibraryCommandTests(BaseRegistratorTests):
             args = argparse.Namespace(library_args=["register"])
 
             value = self.reg.command_library(args, library_manager=manager)
-            self.assertEqual(value, 1)
+            assert value == 1
 
     def test_library_empty_args_returns_error(self):
         with self._temp_registry_home():
@@ -777,7 +748,4 @@ class LibraryCommandTests(BaseRegistratorTests):
             args = argparse.Namespace(library_args=[])
 
             value = self.reg.command_library(args, library_manager=manager)
-            self.assertEqual(value, 1)
-
-if __name__ == "__main__":
-    unittest.main()
+            assert value == 1
