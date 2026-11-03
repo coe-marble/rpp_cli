@@ -28,7 +28,8 @@ BLACKLISTED_PLUGINS = [
 def setup_tmp_rpp_with_test_plugins(
         out_dir: Path = None,
         override: bool = False,
-        component_whitelist: list = None) -> RppHandle:
+        component_whitelist: list = None,
+        config_overrides: dict[str, object] | None = None) -> RppHandle:
     td = None
     if out_dir is None:
         td = tempfile.TemporaryDirectory()
@@ -54,11 +55,13 @@ def setup_tmp_rpp_with_test_plugins(
     # load without new home so the true config is loaded
     library_manager = LibraryManager(skip_layout_check=True)
 
-    true_config = rc.get_config()
-    if true_config is not None:
-        new_config_path = home / "config.json"
-        with open(new_config_path, "w", encoding="utf-8") as f:
-            json.dump(true_config, f, indent=4)
+    true_config = {
+        **rc.get_config(),
+        **(config_overrides or {}),
+    }
+    new_config_path = home / "config.json"
+    with open(new_config_path, "w", encoding="utf-8") as f:
+        json.dump(true_config, f, indent=4)
 
     library_manager = LibraryManager(rpp_home=home, skip_layout_check=False)
     library = library_manager.get_or_create_plugin_library(test_lib)
