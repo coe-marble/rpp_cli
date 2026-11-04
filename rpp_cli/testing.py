@@ -24,6 +24,8 @@ BLACKLISTED_PLUGINS = [
     "example_plugin_with_dependencies"
 ]
 
+TEST_SETUP_MARKER = ".test_setup_complete"
+
 
 def setup_tmp_rpp_with_test_plugins(
         out_dir: Path = None,
@@ -41,17 +43,13 @@ def setup_tmp_rpp_with_test_plugins(
 
     test_lib = "test_lib"
     home = Path(out_dir) / ".rpp"
-    if home.exists():
-        if override:
-            shutil.rmtree(home)
-        else:
-            lm = LibraryManager(rpp_home=home, skip_layout_check=True)
-            plugins = lm.get_library_plugins(test_lib)
-            plugin_return = [{
-                "PluginName": plugin["PluginName"], "SourceLanguage": plugin["SourceLanguage"]} for plugin in plugins.values()]
-            return RppHandle(td=td, out_dir=out_dir, home=home, library_manager=lm, test_lib=test_lib, plugins=plugin_return)
+    if not override and (home / TEST_SETUP_MARKER).is_file():
+        lm = LibraryManager(rpp_home=home, skip_layout_check=True)
+        plugins = lm.get_library_plugins(test_lib)
+        plugin_return = [{
+            "PluginName": plugin["PluginName"], "SourceLanguage": plugin["SourceLanguage"]} for plugin in plugins.values()]
+        return RppHandle(td=td, out_dir=out_dir, home=home, library_manager=lm, test_lib=test_lib, plugins=plugin_return)
 
-    home.mkdir(parents=True, exist_ok=True)
     # load without new home so the true config is loaded
     library_manager = LibraryManager(skip_layout_check=True)
 
@@ -59,6 +57,11 @@ def setup_tmp_rpp_with_test_plugins(
         **rc.get_config(),
         **(config_overrides or {}),
     }
+    # A failed setup can leave interfaces behind without a usable test_lib.
+    # Read its configuration before replacing the incomplete generated home.
+    if home.exists():
+        shutil.rmtree(home)
+    home.mkdir(parents=True, exist_ok=True)
     new_config_path = home / "config.json"
     with open(new_config_path, "w", encoding="utf-8") as f:
         json.dump(true_config, f, indent=4)
@@ -87,4 +90,5 @@ def setup_tmp_rpp_with_test_plugins(
         info = library_manager.register_plugin_from_source(plugin_file, test_lib)
         plugins.append({"PluginName": info["PluginName"], "SourceLanguage": info["SourceLanguage"]})
 
+    (home / TEST_SETUP_MARKER).touch()
     return RppHandle(td=td, out_dir=out_dir, home=home, library_manager=library_manager, test_lib=test_lib, plugins=plugins)
