@@ -499,9 +499,7 @@ class LibraryCommandTests(BaseRegistratorTests):
                 manager.get_plugin_info_from_lib.assert_called_once_with(
                     "Sample", "example"
                 )
-                manager.unregister_plugin.assert_called_once_with(
-                    "example::Sample", "example", remove_from_json=False
-                )
+                manager.unregister_plugin.assert_not_called()
                 manager.register_plugin_from_source.assert_called_once_with(
                     str(source.resolve()), "example"
                 )
@@ -540,19 +538,40 @@ class LibraryCommandTests(BaseRegistratorTests):
                     [mock.call("First", "example"),
                      mock.call("Second", "example")],
                 )
-                self.assertEqual(
-                    manager.unregister_plugin.call_args_list,
-                    [mock.call("example::First", "example",
-                               remove_from_json=False),
-                     mock.call("example::Second", "example",
-                               remove_from_json=False)],
-                )
+                manager.unregister_plugin.assert_not_called()
                 self.assertEqual(
                     manager.register_plugin_from_source.call_args_list,
                     [mock.call(str(first_source.resolve()), "example"),
                      mock.call(str(second_source.resolve()), "example")],
                 )
 
+
+    def test_failed_plugin_refresh_keeps_the_registered_plugin(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            library = Path(tmpdir) / "library"
+            library.mkdir()
+            (library / "controller.py").write_text("# Cannot be imported\n", encoding="utf-8")
+            registered = {"Demo::Controller"}
+
+            class Manager:
+                def get_library_path(self, library_name):
+                    return str(library)
+
+                def get_plugin_info_from_lib(self, plugin_name, library_name):
+                    return {"PluginName": "Demo::Controller", "SourceFile": "controller.py"}
+
+                def unregister_plugin(self, plugin_name, library_name, remove_from_json=True):
+                    registered.discard(plugin_name)
+
+                def register_plugin_from_source(self, source_file, library_name):
+                    raise ValueError("Failed to import plugin class")
+
+            args = argparse.Namespace(library="Demo", plugin_name="Controller")
+
+            with self.assertRaisesRegex(ValueError, "Failed to import plugin class"):
+                self.reg.command_library_refresh_plugin(args, library_manager=Manager())
+
+            self.assertEqual(registered, {"Demo::Controller"})
 
     def test_library_named_refresh_calls_refresh_plugin_library(self):
         with self._temp_registry_home():
