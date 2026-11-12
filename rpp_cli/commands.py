@@ -289,7 +289,7 @@ def command_library_refresh_plugin(args, library_manager=None) -> int:
     if not source_path.is_file():
         raise ValueError(f"Plugin source file does not exist: {source_path}")
 
-    manager.unregister_plugin(plugin_name, args.library, remove_from_json=False)
+    # Registering over the existing entry replaces it, so a failure keeps the old one.
     manager.register_plugin_from_source(str(source_path), args.library)
     print(f"Refreshed plugin '{plugin_name}' in library '{args.library}'")
     return 0

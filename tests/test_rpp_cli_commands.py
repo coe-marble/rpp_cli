@@ -494,9 +494,7 @@ class TestLibraryCommands(BaseRegistratorTests):
                 manager.get_plugin_info_from_lib.assert_called_once_with(
                     "Sample", "example"
                 )
-                manager.unregister_plugin.assert_called_once_with(
-                    "example::Sample", "example", remove_from_json=False
-                )
+                manager.unregister_plugin.assert_not_called()
                 manager.register_plugin_from_source.assert_called_once_with(
                     str(source.resolve()), "example"
                 )
@@ -532,10 +530,7 @@ class TestLibraryCommands(BaseRegistratorTests):
                 assert result == 0
                 assert manager.get_plugin_info_from_lib.call_args_list == [mock.call("First", "example"),
                      mock.call("Second", "example")]
-                assert manager.unregister_plugin.call_args_list == [mock.call("example::First", "example",
-                               remove_from_json=False),
-                     mock.call("example::Second", "example",
-                               remove_from_json=False)]
+                manager.unregister_plugin.assert_not_called()
                 assert manager.register_plugin_from_source.call_args_list == [mock.call(str(first_source.resolve()), "example"),
                      mock.call(str(second_source.resolve()), "example")]
 

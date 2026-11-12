@@ -108,6 +108,33 @@ def test_plugin_refresh_checks_source_before_unregistering(tmp_path, source):
     manager.register_plugin_from_source.assert_not_called()
 
 
+def test_failed_plugin_refresh_keeps_the_registered_plugin(tmp_path):
+    library = tmp_path / "library"
+    library.mkdir()
+    (library / "controller.py").write_text("# Cannot be imported\n", encoding="utf-8")
+    registered = {"Demo::Controller"}
+
+    class Manager:
+        def get_library_path(self, library_name):
+            return str(library)
+
+        def get_plugin_info_from_lib(self, plugin_name, library_name):
+            return {"PluginName": "Demo::Controller", "SourceFile": "controller.py"}
+
+        def unregister_plugin(self, plugin_name, library_name, remove_from_json=True):
+            registered.discard(plugin_name)
+
+        def register_plugin_from_source(self, source_file, library_name):
+            raise ValueError("Failed to import plugin class")
+
+    args = SimpleNamespace(library="Demo", plugin_name="Controller")
+
+    with pytest.raises(ValueError, match="Failed to import plugin class"):
+        commands.command_library_refresh_plugin(args, library_manager=Manager())
+
+    assert registered == {"Demo::Controller"}
+
+
 def test_invalid_parameter_name_does_not_save_parameters(tmp_path, monkeypatch):
     workspace = Mock(root=tmp_path)
     monkeypatch.setattr(commands, "_open_existing_workspace", Mock(return_value=workspace))
