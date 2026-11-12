@@ -132,21 +132,31 @@ class TestRppCliCommand:
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws"])
 
-        with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
+        workspace_module = Mock()
+        workspace_module.main.return_value = 0
+        with patch(
+            "rpp_cli.commands.importlib.import_module", return_value=workspace_module
+        ) as mocked_import:
             result = args.func(args)
 
         assert result == 0
-        mocked_workspace_main.assert_called_once_with([])
+        mocked_import.assert_called_once_with("rpp_orchestrator.cli")
+        workspace_module.main.assert_called_once_with([])
 
     def test_ws_root_opens_gui_in_folder(self):
         parser = self.cli.build_parser()
         args = parser.parse_args(["ws", "--root", "as"])
 
-        with patch("rpp_cli.commands.workspace_main", return_value=0) as mocked_workspace_main:
+        workspace_module = Mock()
+        workspace_module.main.return_value = 0
+        with patch(
+            "rpp_cli.commands.importlib.import_module", return_value=workspace_module
+        ) as mocked_import:
             result = args.func(args)
 
         assert result == 0
-        mocked_workspace_main.assert_called_once_with(["--root", "as"])
+        mocked_import.assert_called_once_with("rpp_orchestrator.cli")
+        workspace_module.main.assert_called_once_with(["--root", "as"])
 
     def test_ws_info_parser_accepts_workspace_root(self):
         parser = self.cli.build_parser()

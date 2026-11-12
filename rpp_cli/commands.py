@@ -21,7 +21,6 @@ from rpp_plugin_registrator.library_manager import LibraryManager
 import rpp_plugin_registrator.plugin_type_registrator as registry_api
 import rpp_plugin_registrator.registry_config as rp
 from rpp_plugin_registrator.plugin_descriptors.core import PluginTypeInfo, PluginInfo, plugin_id_from_name
-from rpp_orchestrator.cli import main as workspace_main
 from rpp_orchestrator.script_catalog import ScriptCatalog
 from rpp_orchestrator.script_handle import language_spec
 from rpp_orchestrator.workspace import Workspace, create_workspace, open_workspace
@@ -614,10 +613,12 @@ def command_pm(args) -> int:
 
 
 def command_ws(args) -> int:
+    # Loading an older workspace CLI can import Qt. Only GUI commands need it.
+    workspace_module = importlib.import_module("rpp_orchestrator.cli")
     workspace_root = getattr(args, "root", None)
     if workspace_root:
-        return int(workspace_main(["--root", workspace_root]) or 0)
-    return int(workspace_main([]) or 0)
+        return int(workspace_module.main(["--root", workspace_root]) or 0)
+    return int(workspace_module.main([]) or 0)
 
 
 def _open_existing_workspace(
