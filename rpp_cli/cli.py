@@ -16,6 +16,7 @@ from .commands import (
     command_init_home,
     command_pm,
     command_registry_info,
+    command_registry_migrate,
     command_list_registry,
     command_ws,
     command_ws_create,
@@ -508,6 +509,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="registry-related commands",
     )
     registry_subparsers = registry_parser.add_subparsers(dest="registry_command", required=True)
+
+    migrate_parser = registry_subparsers.add_parser(
+        "migrate",
+        help="regenerate native and registered libraries for the installed registrator",
+    )
+    migrate_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="show migration order without changing the registry or compiling",
+    )
+    migrate_parser.add_argument(
+        "--no-restore", action="store_true",
+        help="keep the backup but leave migration changes in place on failure",
+    )
+    migrate_parser.set_defaults(func=command_registry_migrate)
 
     describe_parser = registry_subparsers.add_parser(
         "describe",

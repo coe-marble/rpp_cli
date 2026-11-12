@@ -291,10 +291,16 @@ interface SamplePluginType $Anot.plugin("SamplePluginType") {
 
 class TestLibraryCommands(BaseRegistratorTests):
 
+    def _register_test_lib_nn_dependencies(self):
+        """Make the fixture's declared library dependency current first."""
+        dependency = self.manager.get_or_create_plugin_library("data_driven_lib")
+        self.manager.refresh_plugin_library(dependency.name)
+
     def test_library_registers_fixture_from_tests_data(self):
         with self._temp_registry_home() as home:
             fixture_lib = FIXTURE_LIB_PATH
             assert fixture_lib.exists(), f"Missing fixture library: {fixture_lib}"
+            self._register_test_lib_nn_dependencies()
 
             args = argparse.Namespace(library_args=["register", str(fixture_lib)])
             self.reg.command_library(args, self.manager)
@@ -307,6 +313,7 @@ class TestLibraryCommands(BaseRegistratorTests):
     def test_library_registers_fixture_plugin_types_from_plugins_json(self):
         with self._temp_registry_home() as home:
             fixture_lib = FIXTURE_LIB_PATH
+            self._register_test_lib_nn_dependencies()
             args = argparse.Namespace(library_args=["register", str(fixture_lib)])
 
             self.reg.command_library(args, self.manager)

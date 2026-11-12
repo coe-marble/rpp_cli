@@ -8,6 +8,7 @@ import re
 import os
 import sys
 import tempfile
+import traceback
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -184,6 +185,30 @@ def command_registry_setting(args) -> int | None:
     return command_registry_config_set(args)
 
 
+def command_registry_migrate(args, library_manager=None) -> int:
+    from rpp_plugin_registrator.migration import (
+        migrate_registry, plan_registry_migration,
+    )
+
+    try:
+        # Planning must not initialize or silently update native libraries.
+        manager = library_manager if library_manager is not None else LibraryManager(
+            skip_layout_check=True, source_libraries=False)
+        plan = plan_registry_migration(manager)
+        print(f"Target registrator version: {plan.target_version}")
+        print("Migration order: " + " -> ".join(plan.libraries))
+        if args.dry_run:
+            return 0
+        backup = migrate_registry(
+            manager, restore_on_error=not getattr(args, "no_restore", False))
+    except Exception as error:
+        print(f"Registry migration failed: {error}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return 1
+    print(f"Registry migration completed. Backup retained at: {backup}")
+    return 0
+
+
 def command_library_refresh(args, library_manager=None) -> None:
     library = args.library
     manager = _get_library_manager(library_manager)
@@ -209,11 +234,13 @@ def command_library_info(args, library_manager=None) -> None:
     try:
         library_path = manager.get_library_path(library)
         if library_path:
-            manifest_path = Path(manager._manifest_path(library_path))
+            manifest_path = Path(manager._manifest_path(Path(library_path).name))
             if manifest_path.exists():
                 manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
                 plugins = manifest_payload.get("Plugins", {})
                 plugin_types = manifest_payload.get("PluginTypes", {})
+                info["RegisteredRppPluginRegistratorVersion"] = manifest_payload.get(
+                    "RegisteredRppPluginRegistratorVersion")
     except Exception:
         pass
 
@@ -1484,11 +1511,16 @@ _rpp_completion() {
     # Registry command completion.
     if [[ "${COMP_WORDS[1]}" == "registry" ]]; then
         if [[ ${cword} -eq 2 ]]; then
-            COMPREPLY=( $(compgen -W "describe list info generate-interface scaffold" -- "$cur") )
+            COMPREPLY=( $(compgen -W "describe list info generate-interface scaffold migrate" -- "$cur") )
             _rpp_gate_compreply "$cur"
             return 0
         fi
         case "${COMP_WORDS[2]}" in
+            migrate)
+                COMPREPLY=( $(compgen -W "--dry-run --no-restore" -- "$cur") )
+                _rpp_gate_compreply "$cur"
+                return 0
+                ;;
             describe)
                 COMPREPLY=( $(compgen -f -- "$cur") )
                 _rpp_gate_compreply "$cur"

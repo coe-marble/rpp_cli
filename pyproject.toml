@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rpp-cli"
-version = "0.1.0"
+dynamic = ["version"]
 description = "RPP command line interface"
 requires-python = ">=3.10"
 dependencies = [
-    "rpp-plugin-registrator>=0.1,<0.2",
-    "rpp-orchestrator>=0.1,<0.2",
-    "rpp-py>=0.1,<0.2",
+    "rpp-plugin-registrator>=0.2,<0.3",
+    "rpp-orchestrator>=0.2,<0.3",
+    "rpp-py>=0.2,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +21,9 @@ rpp = "rpp_cli.cli:main"
 
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "rpp_cli.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["rpp_cli", "rpp_cli.*"]
